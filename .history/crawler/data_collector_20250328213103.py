@@ -69,9 +69,14 @@ def collect_all_hotspots(sources, base_url):
     logger.info(f"共收集到 {len(all_hotspots)} 条热点数据")
     return all_hotspots
 
-def fetch_rss_articles(rss_url, days=1):
+def fetch_rss_articles(rss_url, days=1, source_name=None):
     """
     从RSS源获取最近指定天数内的文章
+    
+    Args:
+        rss_url: RSS源URL
+        days: 获取最近几天的文章
+        source_name: 自定义源名称，用于标识RSS源类型
     """
     try:
         logger.info(f"正在获取RSS源: {rss_url}")
@@ -94,20 +99,30 @@ def fetch_rss_articles(rss_url, days=1):
                 # 如果没有时间信息，假设是最近的
                 pub_time = current_time
             
-            # 获取作者信息作为来源
-            source = "公众号精选"
+            # 获取源名称
+            source = source_name if source_name else "公众号精选"
             if hasattr(entry, 'author') and entry.author:
-                source = f"公众号 {entry.author}"
+                source = f"{source} {entry.author}"
+            
+            # 检查是否有摘要
+            has_summary = hasattr(entry, 'summary') and entry.summary
             
             # 只保留最近days天的文章
             if pub_time >= cutoff_time:
-                articles.append({
+                article_data = {
                     "title": entry.title,
                     "url": entry.link,
                     "source": source,
                     "hot": "",
-                    "published": pub_time.strftime("%Y-%m-%d %H:%M:%S")
-                })
+                    "published": pub_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "needs_summary": not has_summary  # 标记是否需要摘要
+                }
+                
+                # 如果有摘要，直接添加
+                if has_summary:
+                    article_data["desc"] = entry.summary
+                
+                articles.append(article_data)
         
         logger.info(f"从RSS源获取到 {len(articles)} 篇最近{days}天的文章")
         return articles

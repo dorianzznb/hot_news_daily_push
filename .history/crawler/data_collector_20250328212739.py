@@ -69,13 +69,16 @@ def collect_all_hotspots(sources, base_url):
     logger.info(f"共收集到 {len(all_hotspots)} 条热点数据")
     return all_hotspots
 
-def fetch_rss_articles(rss_url, days=1):
+def fetch_rss_articles(rss_urls, days=1):
     """
-    从RSS源获取最近指定天数内的文章
+    从多个RSS源获取最近指定天数内的文章
     """
-    try:
-        logger.info(f"正在获取RSS源: {rss_url}")
-        feed = feedparser.parse(rss_url)
+    all_articles = []
+    
+    for rss_url in rss_urls:
+        try:
+            logger.info(f"正在获取RSS源: {rss_url}")
+            feed = feedparser.parse(rss_url)
         
         if feed.bozo:  # 检查feed解析是否有错误
             logger.warning(f"RSS解析警告: {feed.bozo_exception}")
@@ -109,8 +112,13 @@ def fetch_rss_articles(rss_url, days=1):
                     "published": pub_time.strftime("%Y-%m-%d %H:%M:%S")
                 })
         
-        logger.info(f"从RSS源获取到 {len(articles)} 篇最近{days}天的文章")
-        return articles
+            logger.info(f"从RSS源获取到 {len(articles)} 篇最近{days}天的文章")
+            all_articles.extend(articles)
+        except Exception as e:
+            logger.error(f"获取RSS源 {rss_url} 时发生错误: {str(e)}")
+            continue
+            
+    return all_articles
     except Exception as e:
         logger.error(f"获取RSS源时发生错误: {str(e)}")
         return []
