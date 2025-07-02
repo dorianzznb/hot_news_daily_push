@@ -1,14 +1,14 @@
-# 忽略数据和缓存目录
-data/
-cache/
-
+# 忽略数据目录
+/data/
+/backup/
+/.history/
 # 忽略环境变量配置文件
 .env
 # 忽略原始单代码文件
 hot_news.py
 
 # 忽略Python缓存文件
-**/__pycache__/
+__pycache__/
 *.py[cod]
 *$py.class
 
@@ -17,3 +17,13 @@ hot_news.py
 
 # 忽略系统文件
 .DS_Store
+
+# 忽略缓存目录
+/cache/
+
+# 忽略临时文件
+*.new
+
+# 忽略 IDE 配置文件 (可选)
+# /.vscode/
+# /.idea/
