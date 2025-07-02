@@ -24,8 +24,9 @@
         - 如以上均失败，使用占位符 `[摘要无法生成：无内容或来源信息不足]`。
         - **长度控制**: 最终所有有效摘要（原始、AI生成、截断）都会被检查，超过150字符会被截断并添加 `...`。
 - **AI驱动的最终总结**：
-    - 使用DeepSeek AI模型对去重和处理后的信息列表进行最终归纳总结。
-    - **优化Prompt**：指导Deepseek理解包含社交媒体信息，并合并内容相似的条目。
+    - **多模型支持**：支持 DeepSeek 和 Google Gemini 两种总结模型，可通过环境变量切换。
+    - 使用所选AI模型对去重和处理后的信息列表进行最终归纳总结。
+    - **优化Prompt**：指导AI模型理解包含社交媒体信息，并合并内容相似的条目。
 - **多渠道推送**：支持9种不同的推送渠道，包括企业微信、钉钉、飞书、Telegram等。
     - **备选推送**: 若所有配置的渠道推送失败，会尝试使用 `.env` 中配置的 `WEBHOOK_URL` 进行推送。
 - **定制化配置**：可通过环境变量灵活配置信息源、推送渠道和AI模型参数。
@@ -56,6 +57,7 @@
 │   └── webhook/        # 推送内容和响应数据
 ├── llm_integration/    # 大语言模型集成模块
 │   ├── deepseek_integration.py  # DeepSeek模型集成 (最终总结)
+│   ├── gemini_integration.py    # Google Gemini模型集成 (最终总结)
 │   └── hunyuan_integration.py   # 腾讯混元模型集成 (单条摘要)
 │   └── __init__.py
 ├── notification/       # 通知推送模块
@@ -113,9 +115,20 @@ cp .env.example .env
 编辑`.env`文件，配置以下**必要**参数：
 
 ```dotenv
-# --- API密钥 ---
+# --- 总结模型选择配置 ---
+SUMMARY_MODEL="deepseek"  # 总结模型选择: deepseek 或 gemini
+
+# --- API密钥 (根据选择的模型配置对应密钥) ---
+# DeepSeek 配置 (当 SUMMARY_MODEL=deepseek 时必填)
 DEEPSEEK_API_KEY="your_deepseek_api_key"  # DeepSeek AI API密钥 (用于最终总结)
-HUNYUAN_API_KEY="your_hunyuan_api_key"    # 腾讯混元大模型API密钥 (用于生成单条摘要，如果SKIP_CONTENT=false且来源非Twitter则可能需要)
+
+# Google Gemini 配置 (当 SUMMARY_MODEL=gemini 时必填)
+GEMINI_API_KEY="your_gemini_api_key"      # Google Gemini API密钥 (用于最终总结)
+GEMINI_BASE_URL="https://gemini.kbz.ink"  # Gemini API代理端点URL
+GEMINI_MODEL_NAME="gemini-2.0-flash-exp"  # Gemini模型名称
+
+# 腾讯混元配置 (用于单条摘要生成)
+HUNYUAN_API_KEY="your_hunyuan_api_key"    # 腾讯混元大模型API密钥 (如果SKIP_CONTENT=false且来源非Twitter则可能需要)
 
 # --- 推送渠道 (至少配置一种，或配置下面的 WEBHOOK_URL 作为备选) ---
 # 以企业微信机器人为例
@@ -168,7 +181,7 @@ python hot_news_main.py
     *   **截断摘要**: 确保最终摘要不超过150字符。
 5.  **去重**: 基于完全相同的标题去重，优先保留RSS/Twitter来源。
 6.  **保存处理后数据**: 将最终列表保存到 `data/processed_output/` 目录下。
-7.  **最终总结**: 将去重后的信息列表发送给Deepseek进行归纳总结。
+7.  **最终总结**: 将去重后的信息列表发送给选择的AI模型（DeepSeek或Gemini）进行归纳总结。
 8.  **推送结果**: 将Deepseek生成的总结通过配置的渠道推送。若失败，尝试使用 `WEBHOOK_URL` 推送。
 9.  **清理**: 删除超过7天的旧数据和缓存文件。
 
@@ -179,6 +192,11 @@ python hot_news_main.py
 ```bash
 # 只处理和总结科技相关内容
 export TECH_ONLY=True
+python hot_news_main.py
+
+# 使用 Gemini 模型进行总结
+export SUMMARY_MODEL=gemini
+export GEMINI_API_KEY=your_gemini_api_key
 python hot_news_main.py
 
 # 禁用腾讯混元摘要缓存 (强制重新生成)
@@ -216,14 +234,23 @@ python hot_news_main.py
 | `RSS_URL` | 单个RSS源URL (**仅在 `config.py` 中 `RSS_FEEDS` 列表为空时生效**) | `None` |
 | `RSS_FEEDS` | 在 `config/config.py` 中配置，包含名称和URL的字典列表 | `[]` (空列表) |
 
+### AI模型配置
+
+| 变量名 | 说明 | 默认值 | 是否必需 |
+|-------|------|-------|--------|
+| `SUMMARY_MODEL` | 总结模型选择 (deepseek 或 gemini) | `deepseek` | 否 |
+
 ### API密钥配置
 
 | 变量名 | 说明 | 是否必需 |
 |-------|------|--------|
-| `DEEPSEEK_API_KEY` | DeepSeek AI API密钥 | **是** |
-| `HUNYUAN_API_KEY` | 腾讯混元大模型API密钥 | **是** (除非`SKIP_CONTENT=True`) |
+| `DEEPSEEK_API_KEY` | DeepSeek AI API密钥 | **是** (当`SUMMARY_MODEL=deepseek`时) |
 | `DEEPSEEK_API_URL` | DeepSeek API接口地址 (可选，覆盖默认) | 否 |
 | `DEEPSEEK_MODEL_ID` | DeepSeek模型ID (可选，覆盖默认) | 否 |
+| `GEMINI_API_KEY` | Google Gemini API密钥 | **是** (当`SUMMARY_MODEL=gemini`时) |
+| `GEMINI_BASE_URL` | Gemini API代理端点URL | 否 |
+| `GEMINI_MODEL_NAME` | Gemini模型名称 | 否 |
+| `HUNYUAN_API_KEY` | 腾讯混元大模型API密钥 | **是** (除非`SKIP_CONTENT=True`) |
 
 ### 推送渠道配置
 
@@ -277,7 +304,29 @@ python hot_news_main.py
 *   在 `config/config.py` 中的 `ALL_SOURCES` 或 `TECH_SOURCES` 列表中添加或移除这些标识符。
 *   可以通过设置 `HOTSPOT_LIMIT` 环境变量控制每个来源获取几条。
 
-### 6. 如何解决 Cloudflare 保护导致的 RSS 获取失败?
+### 6. 如何选择和配置 AI 总结模型?
+
+*   **模型选择**: 通过 `SUMMARY_MODEL` 环境变量选择总结模型：
+    - `deepseek`: 使用 DeepSeek AI 模型（默认）
+    - `gemini`: 使用 Google Gemini 模型
+*   **DeepSeek 配置**: 需要 `DEEPSEEK_API_KEY`，可选配置 API URL 和模型ID
+*   **Gemini 配置**: 
+    - 需要 `GEMINI_API_KEY`（获取方式见下文）
+    - 默认使用代理端点 `https://gemini.kbz.ink`，可通过 `GEMINI_BASE_URL` 自定义
+    - 使用 `Authorization: Bearer {api_key}` 认证方式
+*   两种模型的输出格式和功能基本一致，可根据需要和可用性选择
+
+#### Gemini API 密钥获取
+
+由于直接访问 Google Gemini API 可能受到地域限制，项目默认使用代理服务 `https://gemini.kbz.ink`：
+
+1. **获取API密钥**: 请通过代理服务提供方获取有效的API密钥
+2. **测试连接**: 运行 `python tests/test_gemini_integration.py` 验证配置
+3. **常见错误**:
+   - `401 Unauthorized`: API密钥无效或格式错误
+   - `403 Forbidden`: API密钥权限不足或未激活
+
+### 7. 如何解决 Cloudflare 保护导致的 RSS 获取失败?
 
 *   程序已使用 `cloudscraper` 库尝试模拟浏览器行为绕过简单的 Cloudflare 检查。
 *   对于需要复杂验证（如JS挑战、验证码）的站点，`cloudscraper` 可能仍然失败。日志中会记录相关警告。
@@ -290,6 +339,7 @@ python hot_news_main.py
 
 *   **`test_all_news_sources.py`**: 对所有配置的热点API源和RSS源进行端到端的数据收集和初步处理测试，模拟 `hot_news_main.py` 的主要流程（不含总结和推送），并将各阶段数据保存到 `data/test_sources/` 目录。
 *   **`test_deepseek_timeout.py`**: 专门测试 Deepseek AI 总结 API 的超时和重试机制。使用少量预定义数据调用API，记录尝试次数、耗时和最终结果，并将详细日志保存到 `data/tests/`。
+*   **`test_gemini_integration.py`**: 专门测试 Google Gemini AI 集成功能，包括API连接测试和总结功能测试（科技模式和普通模式）。
 *   **`test_full_data_collection.py`**: 模拟完整的 `hot_news_main.py` 流程（包括可选的摘要生成和 Deepseek 总结，但不推送），并将各阶段结果（原始、过滤、合并、处理、总结）保存到 `data/` 下的对应子目录。
 *   **`test_real_rss_processing.py`**: 专注于测试从真实 RSS 源获取数据后的处理流程。获取配置的 RSS 文章，选取少量进行处理（网页抓取、摘要生成等），并打印详细的处理前后对比信息。
 *   **`test_rss_feeds.py`**: 测试所有在 `config.py` 中配置的 RSS 源的可访问性和基础解析情况。检查 URL 是否可达，`feedparser` 是否能解析，并打印每个源的测试摘要和部分条目信息。

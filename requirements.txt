@@ -28,3 +28,6 @@ pathlib>=1.0.1
 # 数据处理
 json>=2.0.9
 pickle-mixin>=1.0.2
+
+# Google Gemini API
+google-generativeai>=0.8.0

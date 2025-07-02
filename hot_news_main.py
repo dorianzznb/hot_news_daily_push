@@ -15,7 +15,8 @@ from distutils.util import strtobool
 # 导入配置
 from config.config import (
     TECH_SOURCES, ALL_SOURCES, WEBHOOK_URL, DEEPSEEK_API_KEY, 
-    HUNYUAN_API_KEY, BASE_URL, DEEPSEEK_API_URL, DEEPSEEK_MODEL_ID,
+    HUNYUAN_API_KEY, GEMINI_API_KEY, SUMMARY_MODEL, GEMINI_MODEL_NAME, GEMINI_BASE_URL,
+    BASE_URL, DEEPSEEK_API_URL, DEEPSEEK_MODEL_ID,
     RSS_URL, RSS_DAYS, TITLE_LENGTH, MAX_WORKERS, FILTER_DAYS, RSS_FEEDS
 )
 
@@ -33,6 +34,7 @@ from processor.news_processor import process_hotspot_with_summary
 
 # 导入LLM集成模块
 from llm_integration.deepseek_integration import summarize_with_deepseek
+from llm_integration.gemini_integration import summarize_with_gemini
 
 # 导入通知模块
 from notification.webhook_sender import notify, send_to_webhook
@@ -50,6 +52,10 @@ def main():
     webhook = os.getenv('WEBHOOK_URL', WEBHOOK_URL)
     deepseek_key = os.getenv('DEEPSEEK_API_KEY', DEEPSEEK_API_KEY)
     hunyuan_key = os.getenv('HUNYUAN_API_KEY', HUNYUAN_API_KEY)
+    gemini_key = os.getenv('GEMINI_API_KEY', GEMINI_API_KEY)
+    summary_model = os.getenv('SUMMARY_MODEL', SUMMARY_MODEL).lower()
+    gemini_model_name = os.getenv('GEMINI_MODEL_NAME', GEMINI_MODEL_NAME)
+    gemini_base_url = os.getenv('GEMINI_BASE_URL', GEMINI_BASE_URL)
     no_cache = bool(strtobool(os.getenv('NO_CACHE', 'False')))
     base_url = os.getenv('BASE_URL', BASE_URL)
     deepseek_url = os.getenv('DEEPSEEK_API_URL', DEEPSEEK_API_URL)
@@ -66,8 +72,19 @@ def main():
         logger.error("未提供Webhook URL，请在环境变量中设置WEBHOOK_URL")
         sys.exit(1)
     
-    if not deepseek_key:
-        logger.error("未提供Deepseek API Key，请在环境变量中设置DEEPSEEK_API_KEY")
+    # 根据选择的总结模型检查相应的API密钥
+    if summary_model == 'gemini':
+        if not gemini_key:
+            logger.error("选择了Gemini总结模型但未提供API Key，请在环境变量中设置GEMINI_API_KEY")
+            sys.exit(1)
+        logger.info(f"使用Gemini模型进行总结: {gemini_model_name}")
+    elif summary_model == 'deepseek':
+        if not deepseek_key:
+            logger.error("选择了DeepSeek总结模型但未提供API Key，请在环境变量中设置DEEPSEEK_API_KEY")
+            sys.exit(1)
+        logger.info("使用DeepSeek模型进行总结")
+    else:
+        logger.error(f"不支持的总结模型: {summary_model}，支持的模型: deepseek, gemini")
         sys.exit(1)
     
     if not hunyuan_key and not skip_content:
@@ -216,9 +233,13 @@ def main():
         logger.error(f"保存处理后的新闻列表到 {processed_filename} 时出错: {str(e)}")
     # --- 结束：保存逻辑 ---
     
-    # 使用Deepseek汇总，传递tech_only参数
-    summary = summarize_with_deepseek(deduplicated_content, deepseek_key, # 使用去重后的列表
-                                     deepseek_url, model_id, tech_only=tech_only)
+    # 根据配置选择总结模型
+    if summary_model == 'gemini':
+        summary = summarize_with_gemini(deduplicated_content, gemini_key,
+                                       gemini_model_name, gemini_base_url, tech_only=tech_only)
+    else:  # 默认使用 DeepSeek
+        summary = summarize_with_deepseek(deduplicated_content, deepseek_key,
+                                         deepseek_url, model_id, tech_only=tech_only)
     
     # 使用多种方式推送消息
     success = notify(summary, tech_only)

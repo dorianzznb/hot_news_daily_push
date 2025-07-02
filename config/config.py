@@ -14,6 +14,12 @@ load_dotenv()
 # API密钥
 DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 HUNYUAN_API_KEY = os.getenv('HUNYUAN_API_KEY')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+
+# 总结模型选择 (支持: deepseek, gemini)
+SUMMARY_MODEL = os.getenv('SUMMARY_MODEL', 'deepseek')
+GEMINI_MODEL_NAME = os.getenv('GEMINI_MODEL_NAME', 'gemini-2.0-flash-exp')
+GEMINI_BASE_URL = os.getenv('GEMINI_BASE_URL', 'https://gemini.kbz.ink')
 
 # Webhook URL
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
