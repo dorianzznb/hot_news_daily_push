@@ -31,6 +31,22 @@ WEBHOOK_URL=your_webhook_url_here
 # DD_BOT_TOKEN=your_dd_bot_token_here
 
 # =========================
+# 错误通知配置 (可选，独立的错误推送通道)
+# =========================
+# 启用/禁用错误通知功能
+ERROR_NOTIFICATION_ENABLED=true
+
+# 专门用于错误通知的企业微信机器人 (推荐)
+# ERROR_QYWX_KEY=your_error_qywx_key_here
+
+# 专门用于错误通知的Telegram机器人
+# ERROR_TG_BOT_TOKEN=your_error_tg_bot_token_here
+# ERROR_TG_USER_ID=your_telegram_user_id
+
+# 专门用于错误通知的Webhook URL
+# ERROR_WEBHOOK_URL=your_error_webhook_url_here
+
+# =========================
 # 运行模式配置
 # =========================
 TECH_ONLY=false
@@ -55,6 +71,26 @@ NO_CACHE=false
 # =========================
 # 常见错误解决
 # =========================
-# 401 Unauthorized: API密钥无效，请检查密钥格式
+# 400 Bad Request (API_KEY_INVALID): API密钥无效，请检查密钥是否正确
+# 400 Bad Request (User location is not supported): 地理位置限制，请使用VPN
+# 401 Unauthorized: 认证失败，请检查API密钥权限
 # 403 Forbidden: API密钥权限不足或未激活
-# 400 Bad Request: 请求格式错误（已修复） 
+# 40058 (微信webhook): markdown内容超长(>4096字符)，已自动优化控制
+
+# =========================
+# 错误通知说明
+# =========================
+# 新增的错误通知功能将在系统出现异常时通过独立渠道发送通知，避免干扰正常推送：
+# 1. 配置错误 - 发送错误通知后程序退出
+# 2. 网络连接失败 - 发送错误通知后程序退出
+# 3. 数据收集失败 - 发送错误通知后程序退出
+# 4. 内容处理失败 - 发送错误通知但程序继续（使用原始内容）
+# 5. AI总结失败 - 发送错误通知后程序退出
+# 6. 推送失败 - 发送错误通知后程序退出
+# 
+# 测试错误通知: python tests/test_error_notification.py
+
+# 注意：代理服务使用 x-goog-api-key 认证头
+# 注意：Google Gemini API 在某些地区受限，如遇地理位置错误请使用VPN
+# 注意：已优化内容长度控制，每个热点最多关联3个新闻源
+# 注意：错误通知渠道应与正常推送渠道分离，避免用户被错误信息打扰 

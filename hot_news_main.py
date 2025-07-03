@@ -38,6 +38,7 @@ from llm_integration.gemini_integration import summarize_with_gemini
 
 # 导入通知模块
 from notification.webhook_sender import notify, send_to_webhook
+from notification.error_notifier import notify_critical_error, notify_simple_error
 
 # 配置日志
 logging.basicConfig(
@@ -46,7 +47,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def main():
+def safe_main():
+    """
+    安全的主函数，包含完整的错误处理和通知机制
+    当出现致命错误时发送错误通知而不是正常推送
+    """
     # 从环境变量中读取配置，优先使用环境变量，如果不存在则使用config.py中的默认值
     tech_only = bool(strtobool(os.getenv('TECH_ONLY', 'False')))
     webhook = os.getenv('WEBHOOK_URL', WEBHOOK_URL)
@@ -67,33 +72,70 @@ def main():
     skip_content = bool(strtobool(os.getenv('SKIP_CONTENT', 'False')))
     filter_days = int(os.getenv('FILTER_DAYS', str(FILTER_DAYS)))
     
-    # 检查必要的API密钥是否存在
+    # 检查必要的API密钥和配置
+    config_errors = []
+    
     if not webhook:
-        logger.error("未提供Webhook URL，请在环境变量中设置WEBHOOK_URL")
-        sys.exit(1)
+        config_errors.append("未提供Webhook URL")
     
     # 根据选择的总结模型检查相应的API密钥
     if summary_model == 'gemini':
         if not gemini_key:
-            logger.error("选择了Gemini总结模型但未提供API Key，请在环境变量中设置GEMINI_API_KEY")
-            sys.exit(1)
-        logger.info(f"使用Gemini模型进行总结: {gemini_model_name}")
+            config_errors.append("选择了Gemini总结模型但未提供API Key")
+        else:
+            logger.info(f"使用Gemini模型进行总结: {gemini_model_name}")
     elif summary_model == 'deepseek':
         if not deepseek_key:
-            logger.error("选择了DeepSeek总结模型但未提供API Key，请在环境变量中设置DEEPSEEK_API_KEY")
-            sys.exit(1)
-        logger.info("使用DeepSeek模型进行总结")
+            config_errors.append("选择了DeepSeek总结模型但未提供API Key")
+        else:
+            logger.info("使用DeepSeek模型进行总结")
     else:
-        logger.error(f"不支持的总结模型: {summary_model}，支持的模型: deepseek, gemini")
-        sys.exit(1)
+        config_errors.append(f"不支持的总结模型: {summary_model}")
     
     if not hunyuan_key and not skip_content:
-        logger.error("未提供腾讯混元 API Key，请在环境变量中设置HUNYUAN_API_KEY，或设置SKIP_CONTENT=True跳过内容处理")
+        config_errors.append("未提供腾讯混元 API Key且未跳过内容处理")
+    
+    # 如果有配置错误，发送错误通知并退出
+    if config_errors:
+        error_details = {
+            "配置错误列表": config_errors,
+            "当前配置": {
+                "SUMMARY_MODEL": summary_model,
+                "TECH_ONLY": tech_only,
+                "SKIP_CONTENT": skip_content,
+                "有WEBHOOK_URL": bool(webhook),
+                "有DEEPSEEK_API_KEY": bool(deepseek_key),
+                "有GEMINI_API_KEY": bool(gemini_key),
+                "有HUNYUAN_API_KEY": bool(hunyuan_key)
+            }
+        }
+        notify_critical_error(
+            "配置错误",
+            f"检测到 {len(config_errors)} 个配置问题，程序无法启动",
+            error_details,
+            "配置检查"
+        )
+        logger.error("配置错误，程序退出")
         sys.exit(1)
     
     # 检查 BASE_URL 是否可访问
-    if not check_base_url(base_url):
-        logger.error(f"BASE_URL {base_url} 不可访问，程序退出")
+    try:
+        if not check_base_url(base_url):
+            notify_critical_error(
+                "网络连接错误",
+                f"BASE_URL {base_url} 不可访问",
+                {"BASE_URL": base_url},
+                "网络检查"
+            )
+            logger.error(f"BASE_URL {base_url} 不可访问，程序退出")
+            sys.exit(1)
+    except Exception as e:
+        notify_critical_error(
+            "网络检查异常",
+            f"检查BASE_URL时发生异常: {str(e)}",
+            {"BASE_URL": base_url, "错误": str(e)},
+            "网络检查"
+        )
         sys.exit(1)
     
     # 根据参数选择信息源
@@ -157,6 +199,11 @@ def main():
     
     # 检查合并后是否有内容
     if not all_content:
+        notify_simple_error(
+            "数据收集失败",
+            "所有数据源均未获取到有效内容",
+            "数据收集"
+        )
         logger.error("所有来源均未获取到有效内容，程序退出")
         sys.exit(1)
     
@@ -178,6 +225,12 @@ def main():
             )
             logger.info(f"已为 {len(all_content_with_summary)} 条内容生成摘要")
         except Exception as e:
+            # 内容处理失败时发送错误通知，但不退出程序，使用原始内容继续
+            notify_simple_error(
+                "内容处理失败",
+                f"获取网页内容或生成摘要时发生错误: {str(e)}",
+                "内容处理"
+            )
             logger.error(f"获取网页内容或生成摘要时发生错误: {str(e)}")
             # 如果出错，继续使用原始内容
             all_content_with_summary = all_content
@@ -233,40 +286,129 @@ def main():
         logger.error(f"保存处理后的新闻列表到 {processed_filename} 时出错: {str(e)}")
     # --- 结束：保存逻辑 ---
     
-    # 根据配置选择总结模型
-    if summary_model == 'gemini':
-        summary = summarize_with_gemini(deduplicated_content, gemini_key,
-                                       gemini_model_name, gemini_base_url, tech_only=tech_only)
-    else:  # 默认使用 DeepSeek
-        summary = summarize_with_deepseek(deduplicated_content, deepseek_key,
-                                         deepseek_url, model_id, tech_only=tech_only)
+    # AI总结阶段
+    logger.info("开始AI总结阶段...")
+    summary = None
+    try:
+        if summary_model == 'gemini':
+            summary = summarize_with_gemini(deduplicated_content, gemini_key,
+                                           gemini_model_name, gemini_base_url, tech_only=tech_only)
+        else:  # 默认使用 DeepSeek
+            summary = summarize_with_deepseek(deduplicated_content, deepseek_key,
+                                             deepseek_url, model_id, tech_only=tech_only)
+        
+        # 检查总结结果是否有效
+        invalid_keywords = ["失败", "错误", "API错误", "API密钥", "地理位置限制", "认证失败", "权限不足", "请求错误", "连接失败", "解析Gemini返回的JSON失败", "解析DeepSeek返回的JSON失败"]
+        
+        is_error_response = False
+        if not summary or summary.strip() == "":
+            is_error_response = True
+        else:
+            # 检查是否包含错误关键词
+            for keyword in invalid_keywords:
+                if keyword in summary:
+                    is_error_response = True
+                    break
+        
+        if is_error_response:
+            raise Exception(f"AI总结返回无效或错误结果: {summary}")
+            
+    except Exception as e:
+        notify_critical_error(
+            "AI总结失败",
+            f"AI总结阶段发生错误: {str(e)}",
+            {
+                "总结模型": summary_model,
+                "内容数量": len(deduplicated_content),
+                "错误类型": type(e).__name__
+            },
+            "AI总结"
+        )
+        logger.error(f"AI总结失败: {str(e)}")
+        sys.exit(1)
     
-    # 使用多种方式推送消息
-    success = notify(summary, tech_only)
-    if not success:
-        # 如果所有推送方式都失败，尝试使用原始webhook方式作为备选
-        logger.warning("所有配置的推送方式均失败，尝试使用原始webhook方式推送")
-        send_to_webhook(webhook, summary, tech_only)
+    # 推送阶段
+    logger.info("开始推送阶段...")
+    try:
+        # 使用多种方式推送消息
+        success = notify(summary, tech_only)
+        if not success:
+            # 如果所有推送方式都失败，尝试使用原始webhook方式作为备选
+            logger.warning("所有配置的推送方式均失败，尝试使用原始webhook方式推送")
+            fallback_success = send_to_webhook(webhook, summary, tech_only)
+            if not fallback_success:
+                raise Exception("所有推送方式（包括备选方案）均失败")
+        
+        logger.info("✅ 推送成功完成")
+        
+    except Exception as e:
+        notify_critical_error(
+            "推送失败",
+            f"消息推送阶段发生错误: {str(e)}",
+            {
+                "推送渠道数": "多种",
+                "备选webhook": bool(webhook),
+                "摘要长度": len(summary) if summary else 0
+            },
+            "消息推送"
+        )
+        logger.error(f"推送失败: {str(e)}")
+        sys.exit(1)
     
-    logger.info("处理完成")
+    # 清理阶段
+    logger.info("开始清理阶段...")
+    try:
+        directories_to_clean = [
+            "data/raw", "data/filtered", "data/merged", "data/inputs", 
+            "data/outputs", "data/webhook", "cache/summary"
+        ]
+        days_to_keep = 7
+        logger.info(f"开始清理超过 {days_to_keep} 天的旧数据...")
+        for directory in directories_to_clean:
+            cleanup_old_files(directory, days_to_keep=days_to_keep)
+        logger.info("旧数据清理完成")
+        
+    except Exception as e:
+        # 清理失败不是致命错误，只记录日志
+        logger.error(f"清理旧数据时发生错误: {str(e)}")
+        notify_simple_error(
+            "清理失败",
+            f"清理旧数据时发生错误: {str(e)}",
+            "数据清理"
+        )
+    
+    logger.info("🎉 所有处理步骤完成")
 
-    # 在这里添加清理逻辑
-    # 清理旧数据文件
-    directories_to_clean = [
-        "data/raw",      # 原始热点数据
-        "data/filtered", # 筛选后的热点数据
-        "data/merged",   # 合并后的数据
-        "data/inputs",   # LLM 输入数据
-        "data/outputs",  # LLM 输出数据
-        "data/webhook",  # Webhook 日志
-        "cache/summary"  # 摘要缓存 (如果需要清理缓存)
-    ]
-    days_to_keep = 7 # 设置保留天数
-    logger.info(f"开始清理超过 {days_to_keep} 天的旧数据...")
-    for directory in directories_to_clean:
-        cleanup_old_files(directory, days_to_keep=days_to_keep)
 
-    logger.info("旧数据清理完成")
+def main():
+    """
+    主函数入口点，包含完整的错误处理和通知机制
+    当出现致命错误时发送错误通知而不是正常推送
+    """
+    try:
+        safe_main()
+    except KeyboardInterrupt:
+        logger.info("程序被用户中断")
+        notify_simple_error(
+            "程序中断",
+            "程序被用户手动中断",
+            "程序执行"
+        )
+        sys.exit(0)
+    except SystemExit:
+        # 正常退出，不需要额外处理
+        raise
+    except Exception as e:
+        # 捕获所有未处理的异常
+        notify_critical_error(
+            "未知异常",
+            f"程序执行过程中发生未预期的错误: {str(e)}",
+            {"异常类型": type(e).__name__},
+            "程序执行"
+        )
+        logger.error(f"程序发生未知异常: {str(e)}")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

@@ -29,6 +29,11 @@
     - **优化Prompt**：指导AI模型理解包含社交媒体信息，并合并内容相似的条目。
 - **多渠道推送**：支持9种不同的推送渠道，包括企业微信、钉钉、飞书、Telegram等。
     - **备选推送**: 若所有配置的渠道推送失败，会尝试使用 `.env` 中配置的 `WEBHOOK_URL` 进行推送。
+- **独立错误通知系统**：当系统出现异常时，通过独立的错误通知渠道发送错误信息，避免干扰正常的业务推送。
+    - **智能错误分类**: 根据错误严重程度和处理阶段分类处理
+    - **详细错误上下文**: 包含错误类型、发生时间、处理阶段、堆栈信息等完整上下文
+    - **独立通知渠道**: 支持企业微信、Telegram、自定义Webhook等独立错误通知渠道
+    - **错误日志保存**: 自动保存错误通知到 `data/error_logs/` 目录
 - **定制化配置**：可通过环境变量灵活配置信息源、推送渠道和AI模型参数。
 - **科技热点筛选**：可选择只收集和推送科技相关热点 (目前主要影响热榜、摘要生成时的判断以及Deepseek总结)。
 - **缓存机制**：支持**腾讯混元生成的摘要**缓存，提高运行效率（基于内容哈希）。
@@ -48,6 +53,7 @@
 │   └── web_crawler.py     # 网页内容爬取 (包括提取时间戳)
 │   └── __init__.py
 ├── data/               # 数据存储目录 (默认被.gitignore忽略)
+│   ├── error_logs/     # 错误通知日志
 │   ├── filtered/       # 过滤掉过旧内容后的数据
 │   ├── inputs/         # LLM 输入数据 (Deepseek)
 │   ├── merged/         # 合并所有来源（热榜/RSS/Twitter）后的数据
@@ -61,6 +67,7 @@
 │   └── hunyuan_integration.py   # 腾讯混元模型集成 (单条摘要)
 │   └── __init__.py
 ├── notification/       # 通知推送模块
+│   ├── error_notifier.py  # 错误通知系统 (独立的错误推送通道)
 │   ├── webhook_sender.py  # Webhook推送实现 (包括多种渠道)
 │   └── __init__.py
 ├── processor/          # 数据处理模块
@@ -69,6 +76,7 @@
 ── tests/              # 测试代码目录
 │   ├── test_all_news_sources.py       # 测试所有配置的热点API源和RSS源的数据收集和处理流程
 │   ├── test_deepseek_timeout.py       # 测试Deepseek AI API的超时和重试机制
+│   ├── test_error_notification.py     # 测试错误通知系统的各种场景
 │   ├── test_full_data_collection.py   # 模拟完整主流程测试(不含推送)
 │   ├── test_real_rss_processing.py    # 测试真实RSS源的处理流程
 │   ├── test_rss_feeds.py              # 测试所有配置RSS源的可访问性和基础解析
@@ -137,6 +145,14 @@ QYWX_KEY="your_qywx_key"
 
 # --- 通用 Webhook (可选，作为上述渠道失败时的备选) ---
 WEBHOOK_URL="your_webhook_url"
+
+# --- 错误通知配置 (可选，独立的错误推送通道) ---
+ERROR_NOTIFICATION_ENABLED="true"     # 启用/禁用错误通知功能
+ERROR_QYWX_KEY="your_error_qywx_key"  # 专门用于错误通知的企业微信机器人密钥
+# 或者配置其他错误通知渠道
+# ERROR_TG_BOT_TOKEN="your_error_tg_bot_token"
+# ERROR_TG_USER_ID="your_telegram_user_id"
+# ERROR_WEBHOOK_URL="your_error_webhook_url"
 ```
 
 ### 4. (可选) 配置RSS源
@@ -182,8 +198,9 @@ python hot_news_main.py
 5.  **去重**: 基于完全相同的标题去重，优先保留RSS/Twitter来源。
 6.  **保存处理后数据**: 将最终列表保存到 `data/processed_output/` 目录下。
 7.  **最终总结**: 将去重后的信息列表发送给选择的AI模型（DeepSeek或Gemini）进行归纳总结。
-8.  **推送结果**: 将Deepseek生成的总结通过配置的渠道推送。若失败，尝试使用 `WEBHOOK_URL` 推送。
-9.  **清理**: 删除超过7天的旧数据和缓存文件。
+8.  **推送结果**: 将AI生成的总结通过配置的渠道推送。若失败，尝试使用 `WEBHOOK_URL` 推送。
+9.  **错误处理**: 如任何阶段出现异常，系统会通过独立的错误通知渠道发送详细错误信息。
+10. **清理**: 删除超过7天的旧数据和缓存文件。
 
 ### 命令行参数
 
@@ -333,6 +350,37 @@ python hot_news_main.py
 *   此外，程序会尝试从RSS Feed本身提取 `content:encoded` 等字段，如果成功，即使后续抓取失败也可能有内容。
 *   目前没有完美的通用解决方案，可以尝试寻找该站点的其他RSS源或联系站点管理员。
 
+### 8. 错误通知系统是如何工作的?
+
+*   **独立通道**: 错误通知使用与正常推送完全独立的通道，避免用户被错误信息打扰。
+*   **智能分类**: 根据错误严重程度自动分类：
+    - **致命错误** (程序退出): 配置错误、网络连接失败、数据收集失败、AI总结失败、推送失败
+    - **非致命错误** (程序继续): 内容处理失败、数据清理失败
+*   **详细上下文**: 错误通知包含错误类型、发生时间、处理阶段、堆栈信息等完整上下文。
+*   **支持的渠道**: 企业微信机器人、Telegram机器人、自定义Webhook等。
+*   **测试方法**: 运行 `python tests/test_error_notification.py` 测试错误通知功能。
+
+### 9. 如何配置错误通知渠道?
+
+在 `.env` 文件中配置以下变量（选择一种或多种）：
+
+```bash
+# 启用错误通知功能
+ERROR_NOTIFICATION_ENABLED=true
+
+# 企业微信机器人（推荐）
+ERROR_QYWX_KEY=your_error_qywx_key
+
+# Telegram机器人
+ERROR_TG_BOT_TOKEN=your_error_bot_token
+ERROR_TG_USER_ID=your_telegram_user_id
+
+# 自定义Webhook
+ERROR_WEBHOOK_URL=your_error_webhook_url
+```
+
+**重要**: 错误通知渠道应与正常推送渠道分离，建议使用不同的机器人或群组。
+
 ## 测试说明
 
 `tests/` 目录包含一系列用于验证项目各个核心功能的脚本：
@@ -348,6 +396,7 @@ python hot_news_main.py
 *   **`test_web_crawler.py`**: 使用 `unittest` 测试 `crawler/web_crawler.py` 中的网页内容和时间戳提取功能。包含对依赖库导入、基本提取逻辑和已有内容时跳过抓取的测试。**特殊用法**：可通过命令行提供 URL (`python tests/test_web_crawler.py <url>`) 来快速测试对特定网页的抓取效果。
 *   **`test_webhook_detailed.py`**: 详细测试 `notification/webhook_sender.py` 中的所有推送渠道。先尝试通过 `notify()` 统一推送，若失败则逐个调用各渠道的独立推送函数进行测试，并报告每个渠道的成功/失败状态。
 *   **`test_wechat_article.py`**: 一个命令行工具，用于测试对**特定 URL**（尤其是微信公众号文章）的内容和发布时间提取。用法：`python tests/test_wechat_article.py "<url>"`。
+*   **`test_error_notification.py`**: 测试错误通知系统的各种场景，包括错误通知器初始化、内容格式生成、简单错误通知、关键错误通知以及多种错误场景测试。运行前需配置相应的错误通知渠道环境变量。
 
 ## 许可证
 

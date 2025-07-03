@@ -8,6 +8,10 @@
 import os
 import sys
 import logging
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,12 +26,14 @@ def test_gemini_api_connection():
     """测试Gemini API连接"""
     api_key = os.getenv('GEMINI_API_KEY')
     base_url = os.getenv('GEMINI_BASE_URL', 'https://gemini.kbz.ink')
+    model_name = os.getenv('GEMINI_MODEL_NAME', 'gemini-2.0-flash-exp')
+    
     if not api_key:
         logger.error("未设置GEMINI_API_KEY环境变量")
         return False
     
-    logger.info(f"测试Gemini API连接... (端点: {base_url})")
-    success, message = test_gemini_connection(api_key, base_url=base_url)
+    logger.info(f"测试Gemini API连接... (端点: {base_url}, 模型: {model_name})")
+    success, message = test_gemini_connection(api_key, model_name=model_name, base_url=base_url)
     
     if success:
         logger.info(f"✅ Gemini API连接测试成功: {message}")

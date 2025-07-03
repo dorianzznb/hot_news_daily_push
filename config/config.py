@@ -24,6 +24,13 @@ GEMINI_BASE_URL = os.getenv('GEMINI_BASE_URL', 'https://gemini.kbz.ink')
 # Webhook URL
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
+# 错误通知配置 - 独立的错误推送通道
+ERROR_WEBHOOK_URL = os.getenv('ERROR_WEBHOOK_URL')  # 专门用于错误通知的webhook
+ERROR_QYWX_KEY = os.getenv('ERROR_QYWX_KEY')        # 错误通知企业微信机器人key
+ERROR_TG_BOT_TOKEN = os.getenv('ERROR_TG_BOT_TOKEN')  # 错误通知Telegram机器人token
+ERROR_TG_USER_ID = os.getenv('ERROR_TG_USER_ID')      # 错误通知Telegram用户ID
+ERROR_NOTIFICATION_ENABLED = os.getenv('ERROR_NOTIFICATION_ENABLED', 'true').lower() == 'true'
+
 # API配置
 BASE_URL = os.getenv('BASE_URL')
 DEEPSEEK_API_URL = os.getenv('DEEPSEEK_API_URL')
@@ -102,10 +109,10 @@ RSS_FEEDS = [
     {
         'name': 'Twitter',
         'accounts': [
-            {
-                'name': 'Barsee',
-                'url': 'https://rsshub.app/twitter/user/heyBarsee'
-            },
+            # {
+            #     'name': 'Barsee',
+            #     'url': 'https://rsshub.app/twitter/user/heyBarsee'
+            # },
             # {
             #     'name': 'Sam Altman',
             #     'url': 'https://rsshub.app/twitter/user/sama'
