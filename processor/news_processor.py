@@ -82,11 +82,14 @@ async def process_hotspot_with_summary(hotspots, hunyuan_api_key, max_workers=5,
         has_content = bool(content and len(content.strip()) > MIN_CONTENT_LENGTH_FOR_SUMMARY)
         has_timestamp = bool(item.get("timestamp") or item.get("time"))
 
+        # Check if we need to extract time from HTML
+        needs_time_extraction = item.get("needs_time_extraction", False)
+
         # Define conditions for fetching HTML
         # Need content fetch if we *don't* have a valid initial desc AND we *don't* have enough content already.
         needs_content = not has_valid_initial_desc and not has_content 
         needs_timestamp = not has_timestamp
-        needs_fetching = needs_content or needs_timestamp
+        needs_fetching = needs_content or needs_timestamp or needs_time_extraction
 
         # ---> ADD THIS CHECK FOR TWITTER <---
         source = item.get("source", "") # Get the source safely
@@ -101,18 +104,23 @@ async def process_hotspot_with_summary(hotspots, hunyuan_api_key, max_workers=5,
         if needs_fetching:
             log_reason = []
             if needs_content: log_reason.append("缺少内容/有效摘要")
-            if needs_timestamp: log_reason.append("缺少时间戳")
+            if needs_timestamp or needs_time_extraction: log_reason.append("缺少时间戳")
             logger.info(f"需要抓取网页 ({', '.join(log_reason)}): {title}")
             # Fetch both content and HTML if needed. 
             # If fetch fails, content might remain original, html_content might be None.
             try:
-                fetched_content, html_content = fetch_webpage_content(url, existing_content=content)
+                # 如果只需要时间提取而不需要内容，则只获取HTML
+                if (needs_timestamp or needs_time_extraction) and not needs_content:
+                    fetched_content, html_content = fetch_webpage_content(url, existing_content=content, fetch_html_only=True)
+                else:
+                    fetched_content, html_content = fetch_webpage_content(url, existing_content=content)
+                
                 if fetched_content and fetched_content != content: # Update content only if fetch provided new content
                     logger.info(f"网页抓取成功，获取到新内容: {title}")
                     content = fetched_content 
                     has_content = bool(content and len(content.strip()) > MIN_CONTENT_LENGTH_FOR_SUMMARY)
                 elif html_content:
-                    logger.info(f"网页抓取成功，获取到HTML (内容未变或抓取失败): {title}")
+                    logger.info(f"网页抓取成功，获取到HTML (内容未变或仅获取HTML): {title}")
                 else:
                      logger.warning(f"网页抓取未能获取到有效内容或HTML: {title}")
             except Exception as fetch_err:
@@ -124,19 +132,24 @@ async def process_hotspot_with_summary(hotspots, hunyuan_api_key, max_workers=5,
         logger.info(f"抓取尝试后(如果需要)，内容状态: has_content={has_content}, 长度={len(content.strip() if content else '')} for {title}")
 
         # --- 4. Extract Timestamp if Necessary (using potentially fetched HTML) ---
-        if needs_timestamp: # Check if we *needed* it, even if fetch failed
-            if html_content: # Proceed only if we successfully got html
+        # Check if we need to extract time from HTML (either no timestamp or marked as needs_time_extraction)
+        if needs_timestamp or needs_time_extraction:
+            if html_content:
                 publish_time = extract_publish_time_from_html(html_content, url)
                 if publish_time:
                     logger.info(f"从HTML中提取到发布时间: {publish_time}, 标题: {title}")
                     item["extracted_time"] = publish_time.isoformat()
                     item["timestamp"] = int(publish_time.timestamp() * 1000)
-                    has_timestamp = True # Mark timestamp as now available
+                    # 更新published字段为真实的发布时间
+                    item["published"] = publish_time.strftime("%Y-%m-%d %H:%M:%S")
+                    has_timestamp = True
+                    # 移除needs_time_extraction标记
+                    if "needs_time_extraction" in item:
+                        del item["needs_time_extraction"]
                 else:
-                     logger.info(f"未能在HTML中找到发布时间: {title}")
+                    logger.info(f"未能在HTML中找到发布时间: {title}")
             else:
-                 # Log only if we NEEDED the timestamp but couldn't get HTML
-                 logger.warning(f"需要时间戳但无法获取HTML内容: {title}")
+                logger.warning(f"需要时间戳但无法获取HTML内容: {title}")
         
         # --- 5. Attempt AI Summary or Use Fallback ---
         # Use the state *after* potential HTML fetching

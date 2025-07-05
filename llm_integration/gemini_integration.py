@@ -66,7 +66,7 @@ def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.0-flash-exp", 
                 重点关注最新发布的AI技术、模型或者产品等，相关新闻在返回的结果排序中需要前置；公众号的文章权重更高，其余结果按重要性排序。
                 你需要将相似的新闻合并为一条，并提供一个直观简洁的中文标题，需要讲清楚新闻内容不要太泛化（不超过30个字）。
                 同时，也请关注来自 Twitter 等社交媒体源 (source: Twitter) 的重要信息，特别是关于最新 AI 技术突破、模型发布或重要行业及AI产品动态的帖子，它们同样具有很高的价值。
-                相关新闻的ID列表最多选择其中 2条，取最重要和直观的，超过数量不需要全部给出。请特别注意，如果同一家媒体在多个渠道发布相同的内容，或新闻标题相似度极高，不要同时选择，则仅需列出1条即可。
+                相关新闻的ID列表最多选择其中3条，取最重要和直观的，超过数量不需要全部给出。请特别注意，如果同一家媒体在多个渠道发布相同的内容，或新闻标题相似度极高，不要同时选择，则仅需列出1条即可。
                 如果有摘要信息，请参考摘要提供更准确的标题。
                 
                 请以JSON格式返回结果，格式如下：
@@ -89,7 +89,7 @@ def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.0-flash-exp", 
                 请总结出10条最重要的热点新闻，优先选择科技和AI相关新闻，但也要包含其他领域（如社会、娱乐、体育等）的重要新闻，去除重复内容。
                 你需要将相似的新闻合并为一条，并提供一个直观简洁的中文标题，需要讲清楚新闻内容不要太泛化（不超过30个字）。
                 同时，也请关注来自 Twitter 等社交媒体源 (source: Twitter) 的重要信息，特别是关于最新 AI 技术突破、模型发布或重要行业动态的帖子，将它们与新闻同等对待进行筛选和总结。
-                相关新闻的ID列表最多选择其中 2条，取最重要和直观的，超过数量不需要全部给出。请特别注意，如果同一家媒体在多个渠道发布相同的内容，或新闻标题相似度极高，不要同时选择，则仅需列出1条即可。
+                相关新闻的ID列表最多选择其中3条，取最重要和直观的，超过数量不需要全部给出。请特别注意，如果同一家媒体在多个渠道发布相同的内容，或新闻标题相似度极高，不要同时选择，则仅需列出1条即可。
                 如果有摘要信息，请参考摘要提供更准确的标题。
                 
                 请以JSON格式返回结果，格式如下：
@@ -216,6 +216,10 @@ def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.0-flash-exp", 
                 news_items = json.loads(json_str)
                 
                 # 构建完整的格式化输出函数
+                def get_utf8_byte_length(text):
+                    """计算文本的UTF-8字节长度"""
+                    return len(text.encode('utf-8'))
+                
                 def build_formatted_summary(news_items, max_ids_per_news=10):
                     """构建格式化摘要，支持动态调整每条新闻的关联ID数量"""
                     formatted_summary = ""
@@ -252,36 +256,36 @@ def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.0-flash-exp", 
                 
                 # 先按原始数量生成完整内容
                 formatted_summary = build_formatted_summary(news_items)
-                original_length = len(formatted_summary)
+                original_length = get_utf8_byte_length(formatted_summary)
                 
-                # 检查长度是否超限
-                max_length = 4000  # 企业微信限制4096，留一些余量
+                # 检查长度是否超限 - 使用字节长度而非字符长度
+                max_length = 4000  # 企业微信限制4096字节，留一些余量
                 if original_length > max_length:
-                    logger.warning(f"生成的内容长度 {original_length} 超过限制 {max_length}，开始智能压缩...")
+                    logger.warning(f"生成的内容UTF-8字节长度 {original_length} 超过限制 {max_length}，开始智能压缩...")
                     
                     # 逐步减少每条新闻的关联ID数量
                     for max_ids in [3, 2, 1]:
                         compressed_summary = build_formatted_summary(news_items, max_ids)
-                        compressed_length = len(compressed_summary)
-                        logger.info(f"尝试每条新闻最多 {max_ids} 个ID，内容长度: {compressed_length}")
+                        compressed_length = get_utf8_byte_length(compressed_summary)
+                        logger.info(f"尝试每条新闻最多 {max_ids} 个ID，内容UTF-8字节长度: {compressed_length}")
                         
                         if compressed_length <= max_length:
                             formatted_summary = compressed_summary
-                            logger.info(f"✅ 压缩成功！最终长度: {compressed_length}，每条新闻最多 {max_ids} 个关联ID")
+                            logger.info(f"✅ 压缩成功！最终UTF-8字节长度: {compressed_length}，每条新闻最多 {max_ids} 个关联ID")
                             break
                     else:
                         # 如果还是超长，则移除部分新闻条目
                         for max_news in [8, 6, 5]:
                             truncated_summary = build_formatted_summary(news_items[:max_news], 1)
-                            truncated_length = len(truncated_summary)
-                            logger.info(f"尝试只保留前 {max_news} 条新闻，内容长度: {truncated_length}")
+                            truncated_length = get_utf8_byte_length(truncated_summary)
+                            logger.info(f"尝试只保留前 {max_news} 条新闻，内容UTF-8字节长度: {truncated_length}")
                             
                             if truncated_length <= max_length:
                                 formatted_summary = truncated_summary
-                                logger.warning(f"⚠️  极端压缩：只保留前 {max_news} 条新闻，最终长度: {truncated_length}")
+                                logger.warning(f"⚠️  极端压缩：只保留前 {max_news} 条新闻，最终UTF-8字节长度: {truncated_length}")
                                 break
                 else:
-                    logger.info(f"✅ 内容长度 {original_length} 在限制范围内，无需压缩")
+                    logger.info(f"✅ 内容UTF-8字节长度 {original_length} 在限制范围内，无需压缩")
                 
                 # 保存格式化后的摘要内容
                 summary_filename = os.path.join(output_directory, f"formatted_summary_{today}_{timestamp}.md")

@@ -99,7 +99,7 @@ def test_rss_parser(feed_info):
                 logger.info(f"字段: {key}, 值: {value_preview}")
             
             # 使用新的解析器提取信息
-            entry_data = extract_rss_entry(entry)
+            entry_data = extract_rss_entry(entry, feed, feed_url)
             
             logger.info(f"\n条目 {i+1}: {entry_data['title']}")
             logger.info(f"链接: {entry_data['link']}")
@@ -132,15 +132,15 @@ def main():
     # 测试机器之心RSS源
     jiqizhixin_feed = None
     for feed in RSS_FEEDS:
-        if feed.get('name') == '机器之心':
+        if feed.get('name') == '公众号-APPSO':
             jiqizhixin_feed = feed
             break
     
     if jiqizhixin_feed:
-        logger.info("\n测试机器之心RSS源解析\n" + "=" * 50)
+        logger.info("\n测试公众号RSS源解析\n" + "=" * 50)
         test_rss_parser(jiqizhixin_feed)
     else:
-        logger.error("未找到机器之心RSS源配置")
+        logger.error("未找到公众号RSS源配置")
     
     # 可选：测试其他RSS源
     # for feed in RSS_FEEDS[:2]:  # 只测试前两个源

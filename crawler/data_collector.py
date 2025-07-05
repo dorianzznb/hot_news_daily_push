@@ -13,7 +13,7 @@ import time
 import os
 from datetime import datetime, timedelta, timezone
 from config.config import SOURCE_NAME_MAP
-from crawler.rss_parser import extract_rss_entry
+from crawler.rss_parser import extract_rss_entry, _extract_publish_time
 import json # 确保导入 json
 from bs4 import BeautifulSoup # 导入 BeautifulSoup
 import socket
@@ -168,26 +168,34 @@ def _process_single_rss(feed_url, feed_name, headers, days, cutoff_time, current
     
     for entry in feed.entries:
         try:
-            # 尝试获取发布时间
-            if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                pub_time = datetime.fromtimestamp(time.mktime(entry.published_parsed))
-            elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
-                pub_time = datetime.fromtimestamp(time.mktime(entry.updated_parsed))
-            else:
-                # 如果没有时间信息，假设是最近的
-                pub_time = current_time
+            # 使用修复后的时间解析函数
+            pub_time = _extract_publish_time(entry)
             
-            # 只保留最近days天的文章
-            if pub_time >= cutoff_time:
+            # 时间过滤逻辑：如果有时间信息，才进行过滤；如果没有时间信息，则保留该条目
+            should_include = True
+            if pub_time is not None:
+                # 只保留最近days天的文章
+                should_include = pub_time >= cutoff_time
+                if not should_include:
+                    logger.debug(f"文章时间过旧，跳过: {entry.title if hasattr(entry, 'title') else '未知标题'} @ {pub_time}")
+            else:
+                # 如果没有时间信息，标记需要从网页提取
+                logger.warning(f"RSS条目缺少时间信息，将尝试从网页提取: {entry.title if hasattr(entry, 'title') else '未知标题'}")
+            
+            if should_include:
                 # 使用标准化的RSS解析函数提取信息
-                entry_data = extract_rss_entry(entry)
+                entry_data = extract_rss_entry(entry, feed, feed_url)
                 
                 # 根据源类型设置不同的source标识
                 if feed_name.lower().find('公众号') >= 0:
                     # 如果是公众号类型的源
                     source = "公众号精选"
                     if entry_data["author"] != "未知作者":
-                        source = f"{feed_name}-{entry_data['author']}"
+                        # 避免重复：如果feed_name已经包含了author信息，就不重复添加
+                        if entry_data["author"] not in feed_name:
+                            source = f"{feed_name}-{entry_data['author']}"
+                        else:
+                            source = feed_name  # 直接使用feed_name，避免重复
                 else:
                     # 其他技术博客或新闻源
                     source = feed_name
@@ -198,7 +206,8 @@ def _process_single_rss(feed_url, feed_name, headers, days, cutoff_time, current
                     "url": entry_data["link"],
                     "source": source,
                     "hot": "",
-                    "published": pub_time.strftime("%Y-%m-%d %H:%M:%S")
+                    "published": pub_time.strftime("%Y-%m-%d %H:%M:%S") if pub_time else "",
+                    "needs_time_extraction": pub_time is None  # 标记是否需要从网页提取时间
                 }
                 
                 # 检查是否已有内容或摘要，如果有则直接添加，避免后续重复爬取
@@ -511,26 +520,34 @@ def fetch_rss_articles(rss_url=None, days=1, rss_feeds=None):
                 articles_count = 0
                 for entry in feed.entries:
                     try:
-                        # 尝试获取发布时间
-                        if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                            pub_time = datetime.fromtimestamp(time.mktime(entry.published_parsed))
-                        elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
-                            pub_time = datetime.fromtimestamp(time.mktime(entry.updated_parsed))
-                        else:
-                            # 如果没有时间信息，假设是最近的
-                            pub_time = current_time
+                        # 使用修复后的时间解析函数
+                        pub_time = _extract_publish_time(entry)
                         
-                        # 只保留最近days天的文章
-                        if pub_time >= cutoff_time:
+                        # 时间过滤逻辑：如果有时间信息，才进行过滤；如果没有时间信息，则保留该条目
+                        should_include = True
+                        if pub_time is not None:
+                            # 只保留最近days天的文章
+                            should_include = pub_time >= cutoff_time
+                            if not should_include:
+                                logger.debug(f"文章时间过旧，跳过: {entry.title if hasattr(entry, 'title') else '未知标题'} @ {pub_time}")
+                        else:
+                            # 如果没有时间信息，标记需要从网页提取
+                            logger.warning(f"RSS条目缺少时间信息，将尝试从网页提取: {entry.title if hasattr(entry, 'title') else '未知标题'}")
+                        
+                        if should_include:
                             # 使用标准化的RSS解析函数提取信息
-                            entry_data = extract_rss_entry(entry)
+                            entry_data = extract_rss_entry(entry, feed, feed_url)
                             
                             # 根据源类型设置不同的source标识
                             if feed_name.lower().find('公众号') >= 0:
                                 # 如果是公众号类型的源
                                 source = "公众号精选"
                                 if entry_data["author"] != "未知作者":
-                                    source = f"{feed_name}-{entry_data['author']}"
+                                    # 避免重复：如果feed_name已经包含了author信息，就不重复添加
+                                    if entry_data["author"] not in feed_name:
+                                        source = f"{feed_name}-{entry_data['author']}"
+                                    else:
+                                        source = feed_name  # 直接使用feed_name，避免重复
                             else:
                                 # 其他技术博客或新闻源
                                 source = feed_name
@@ -541,7 +558,8 @@ def fetch_rss_articles(rss_url=None, days=1, rss_feeds=None):
                                 "url": entry_data["link"],
                                 "source": source,
                                 "hot": "",
-                                "published": pub_time.strftime("%Y-%m-%d %H:%M:%S")
+                                "published": pub_time.strftime("%Y-%m-%d %H:%M:%S") if pub_time else "",
+                                "needs_time_extraction": pub_time is None  # 标记是否需要从网页提取时间
                             }
                             
                             content_found = False
@@ -709,26 +727,34 @@ def fetch_rss_articles(rss_url=None, days=1, rss_feeds=None):
             articles_count = 0
             for entry in feed.entries:
                 try:
-                    # 尝试获取发布时间
-                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                        pub_time = datetime.fromtimestamp(time.mktime(entry.published_parsed))
-                    elif hasattr(entry, 'updated_parsed') and entry.updated_parsed:
-                        pub_time = datetime.fromtimestamp(time.mktime(entry.updated_parsed))
-                    else:
-                        # 如果没有时间信息，假设是最近的
-                        pub_time = current_time
+                    # 使用修复后的时间解析函数
+                    pub_time = _extract_publish_time(entry)
                     
-                    # 只保留最近days天的文章
-                    if pub_time >= cutoff_time:
+                    # 时间过滤逻辑：如果有时间信息，才进行过滤；如果没有时间信息，则保留该条目
+                    should_include = True
+                    if pub_time is not None:
+                        # 只保留最近days天的文章
+                        should_include = pub_time >= cutoff_time
+                        if not should_include:
+                            logger.debug(f"文章时间过旧，跳过: {entry.title if hasattr(entry, 'title') else '未知标题'} @ {pub_time}")
+                    else:
+                        # 如果没有时间信息，标记需要从网页提取
+                        logger.warning(f"RSS条目缺少时间信息，将尝试从网页提取: {entry.title if hasattr(entry, 'title') else '未知标题'}")
+                    
+                    if should_include:
                         # 使用标准化的RSS解析函数提取信息
-                        entry_data = extract_rss_entry(entry)
+                        entry_data = extract_rss_entry(entry, feed, rss_url)
                         
                         # 根据源类型设置不同的source标识
                         if feed_name.lower().find('公众号') >= 0:
                             # 如果是公众号类型的源
                             source = "公众号精选"
                             if entry_data["author"] != "未知作者":
-                                source = f"{feed_name}-{entry_data['author']}"
+                                # 避免重复：如果feed_name已经包含了author信息，就不重复添加
+                                if entry_data["author"] not in feed_name:
+                                    source = f"{feed_name}-{entry_data['author']}"
+                                else:
+                                    source = feed_name  # 直接使用feed_name，避免重复
                         else:
                             # 其他技术博客或新闻源
                             source = feed_name
@@ -739,7 +765,8 @@ def fetch_rss_articles(rss_url=None, days=1, rss_feeds=None):
                             "url": entry_data["link"],
                             "source": source,
                             "hot": "",
-                            "published": pub_time.strftime("%Y-%m-%d %H:%M:%S")
+                            "published": pub_time.strftime("%Y-%m-%d %H:%M:%S") if pub_time else "",
+                            "needs_time_extraction": pub_time is None  # 标记是否需要从网页提取时间
                         }
                         
                         content_found = False

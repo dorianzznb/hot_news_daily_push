@@ -99,7 +99,7 @@ class TestRSSProcessing(unittest.TestCase):
     @patch('processor.news_processor.summarize_with_tencent_hunyuan')
     @patch('processor.news_processor.os.path.exists')
     @patch('processor.news_processor.open')
-    async def test_process_hotspot_with_summary(self, mock_open, mock_exists, mock_summarize, mock_extract_time, mock_fetch):
+    def test_process_hotspot_with_summary(self, mock_open, mock_exists, mock_summarize, mock_extract_time, mock_fetch):
         """测试process_hotspot_with_summary函数"""
         # 设置模拟函数的返回值
         mock_fetch.return_value = (self.mock_webpage_content, self.mock_html_content)
@@ -107,14 +107,14 @@ class TestRSSProcessing(unittest.TestCase):
         mock_summarize.return_value = self.mock_summary_result
         mock_exists.return_value = False  # 假设merged文件不存在，避免文件操作
         
-        # 调用被测试的函数
-        result = await process_hotspot_with_summary(
+        # 调用被测试的函数（使用asyncio.run运行异步函数）
+        result = asyncio.run(process_hotspot_with_summary(
             self.test_rss_items,
             self.test_api_key,
             max_workers=2,
             tech_only=False,
             use_cache=False
-        )
+        ))
         
         # 验证结果
         self.assertEqual(len(result), len(self.test_rss_items))
@@ -167,7 +167,7 @@ class TestRSSProcessing(unittest.TestCase):
         
         # 验证结果
         self.assertEqual(content, existing_content)
-        self.assertEqual(html, "")  # HTML应为空字符串
+        self.assertIsNone(html)  # HTML应为None，因为跳过了爬取
         
         # 验证requests.get没有被调用
         mock_get.assert_not_called()

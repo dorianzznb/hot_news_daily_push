@@ -13,12 +13,14 @@ from typing import Dict, Any, Optional, List, Union
 logger = logging.getLogger(__name__)
 
 
-def extract_rss_entry(entry: Any) -> Dict[str, Any]:
+def extract_rss_entry(entry: Any, feed: Any = None, feed_url: str = "") -> Dict[str, Any]:
     """
     从RSS条目中提取标准化的信息
     
     参数:
         entry: feedparser解析后的单个条目
+        feed: feedparser解析后的feed对象（可选）
+        feed_url: RSS源的URL（可选）
         
     返回:
         包含标准化信息的字典
@@ -39,7 +41,7 @@ def extract_rss_entry(entry: Any) -> Dict[str, Any]:
     result["link"] = _extract_link(entry)
     
     # 3. 提取作者
-    result["author"] = _extract_author(entry)
+    result["author"] = _extract_author(entry, feed, feed_url)
     
     # 4. 提取发布时间
     pub_time = _extract_publish_time(entry)
@@ -111,11 +113,23 @@ def _extract_link(entry: Any) -> str:
     return ""
 
 
-def _extract_author(entry: Any) -> str:
+def _extract_author(entry: Any, feed: Any = None, feed_url: str = "") -> str:
     """
     提取作者信息
     """
-    if not hasattr(entry, 'author'):
+    # 检查是否是werss.tuber.cc的微信公众号RSS源
+    is_wechat_rss = feed_url and "werss.tuber.cc" in feed_url
+    
+    if is_wechat_rss:
+        # 对于微信公众号RSS源，如果没有author字段，使用feed的title作为作者
+        if not hasattr(entry, 'author') or not entry.author:
+            if feed and hasattr(feed, 'feed') and hasattr(feed.feed, 'title'):
+                wechat_author = feed.feed.title
+                logger.info(f"检测到微信公众号RSS源，使用feed标题作为作者: {wechat_author}")
+                return wechat_author
+    
+    # 标准的author字段处理
+    if not hasattr(entry, 'author') or not entry.author:
         return "未知作者"
     
     # 处理作者是字典的情况（Atom格式常见）
@@ -137,6 +151,27 @@ def _extract_publish_time(entry: Any) -> Optional[datetime]:
     # 其次使用updated_parsed字段
     if hasattr(entry, 'updated_parsed') and entry.updated_parsed:
         return datetime.fromtimestamp(time.mktime(entry.updated_parsed))
+    
+    # 如果feedparser无法解析，尝试手动解析时间字段
+    # 先尝试published字段
+    if hasattr(entry, 'published') and entry.published:
+        try:
+            from dateutil.parser import parse
+            parsed_time = parse(entry.published.strip())
+            logger.info(f"手动解析published字段成功: {parsed_time}")
+            return parsed_time
+        except Exception as e:
+            logger.debug(f"手动解析published字段失败: {e}")
+    
+    # 再尝试updated字段（微信公众号常用）
+    if hasattr(entry, 'updated') and entry.updated:
+        try:
+            from dateutil.parser import parse
+            parsed_time = parse(entry.updated.strip())
+            logger.info(f"手动解析updated字段成功: {parsed_time}")
+            return parsed_time
+        except Exception as e:
+            logger.debug(f"手动解析updated字段失败: {e}")
     
     return None
 

@@ -104,7 +104,7 @@ async def test_full_data_collection():
     logger.info(f"成功收集到 {len(hotspots)} 条热点数据")
     
     # 保存原始热点数据
-    original_file = save_hotspots_to_jsonl(hotspots)
+    original_file = save_hotspots_to_jsonl(hotspots, directory=os.path.join("data", "raw"))
     logger.info(f"原始热点数据已保存到: {original_file}")
     
     # 筛选最近的热点
