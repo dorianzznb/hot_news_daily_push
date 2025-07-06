@@ -21,6 +21,14 @@ import socket
 # 配置日志
 logger = logging.getLogger(__name__)
 
+# 尝试导入crawl4ai集成模块
+try:
+    from crawler.crawl4ai_integration import crawl4ai, fetch_rss_with_fallback
+    CRAWL4AI_AVAILABLE = True
+except ImportError:
+    CRAWL4AI_AVAILABLE = False
+    logger.warning("无法导入crawl4ai集成模块，将使用传统方法")
+
 def fetch_hotspot(source, base_url):
     """
     从指定源获取热点数据
@@ -77,7 +85,7 @@ def collect_all_hotspots(sources, base_url):
 def _process_single_rss(feed_url, feed_name, headers, days, cutoff_time, current_time, all_articles):
     """
     处理单个RSS源并将文章添加到all_articles列表中
-    使用 cloudscraper 尝试绕过 Cloudflare
+    优先使用crawl4ai，失败时回退到传统方法（cloudscraper）
     """
     max_retries = 3
     retry_count = 0
@@ -85,6 +93,27 @@ def _process_single_rss(feed_url, feed_name, headers, days, cutoff_time, current
     articles_count = 0
     timeout = 20 # 增加超时时间
     
+    # 优先使用crawl4ai获取RSS
+    if CRAWL4AI_AVAILABLE and crawl4ai.is_enabled():
+        try:
+            logger.info(f"优先使用crawl4ai获取RSS源: {feed_name}")
+            result = crawl4ai.crawl_rss(feed_url)
+            
+            if result["success"] and result["html"]:
+                # 使用crawl4ai获取的HTML内容解析RSS
+                feed = feedparser.parse(result["html"])
+                logger.info(f"crawl4ai成功获取RSS源: {feed_name}")
+                
+                # 直接跳转到RSS解析处理
+                _process_rss_feed(feed, feed_name, feed_url, days, cutoff_time, current_time, all_articles)
+                return
+            else:
+                logger.warning(f"crawl4ai获取RSS失败: {feed_name}, 错误: {result.get('error', '未知错误')}, 回退到传统方法")
+                
+        except Exception as e:
+            logger.error(f"crawl4ai获取RSS出错: {feed_name}, 错误: {str(e)}, 回退到传统方法")
+    
+    # 回退到传统方法
     while retry_count < max_retries:
         try:
             logger.info(f"尝试获取RSS源 {feed_name} (使用 cloudscraper)，第 {retry_count + 1} 次尝试")
@@ -141,6 +170,24 @@ def _process_single_rss(feed_url, feed_name, headers, days, cutoff_time, current
                 retry_delay *= 1.5
             else:
                 logger.error(f"RSS源 {feed_name} 访问失败，已达最大重试次数: {str(e)}")
+                # 尝试使用crawl4ai作为备用方案
+                if CRAWL4AI_AVAILABLE and crawl4ai.is_available_as_fallback():
+                    logger.info(f"传统方法失败，尝试使用crawl4ai作为备用方案获取RSS源: {feed_name}")
+                    try:
+                        result = crawl4ai.crawl_rss(feed_url, as_fallback=True)
+                        if result["success"] and result["html"]:
+                            # 使用crawl4ai获取的HTML内容解析RSS
+                            feed = feedparser.parse(result["html"])
+                            logger.info(f"crawl4ai备用方案成功获取RSS源: {feed_name}")
+                            
+                            # 直接跳转到RSS解析处理
+                            _process_rss_feed(feed, feed_name, feed_url, days, cutoff_time, current_time, all_articles)
+                            return
+                        else:
+                            logger.warning(f"crawl4ai备用方案也失败: {feed_name}, 错误: {result.get('error', '未知错误')}")
+                    except Exception as e:
+                        logger.error(f"crawl4ai备用方案出错: {feed_name}, 错误: {str(e)}")
+                
                 return # 达到最大重试次数，跳过此RSS源
         except Exception as e: # 其他未知错误
             retry_count += 1
@@ -150,13 +197,57 @@ def _process_single_rss(feed_url, feed_name, headers, days, cutoff_time, current
                 retry_delay *= 1.5
             else:
                 logger.error(f"RSS源 {feed_name} 处理失败，已达最大重试次数: {str(e)}")
+                # 尝试使用crawl4ai作为备用方案
+                if CRAWL4AI_AVAILABLE and crawl4ai.is_available_as_fallback():
+                    logger.info(f"传统方法失败，尝试使用crawl4ai作为备用方案获取RSS源: {feed_name}")
+                    try:
+                        result = crawl4ai.crawl_rss(feed_url, as_fallback=True)
+                        if result["success"] and result["html"]:
+                            # 使用crawl4ai获取的HTML内容解析RSS
+                            feed = feedparser.parse(result["html"])
+                            logger.info(f"crawl4ai备用方案成功获取RSS源: {feed_name}")
+                            
+                            # 直接跳转到RSS解析处理
+                            _process_rss_feed(feed, feed_name, feed_url, days, cutoff_time, current_time, all_articles)
+                            return
+                        else:
+                            logger.warning(f"crawl4ai备用方案也失败: {feed_name}, 错误: {result.get('error', '未知错误')}")
+                    except Exception as e:
+                        logger.error(f"crawl4ai备用方案出错: {feed_name}, 错误: {str(e)}")
+                
                 return # 达到最大重试次数，跳过此RSS源
 
     # 如果循环正常结束（break），则继续处理 feed
     if 'feed' not in locals(): # 确保 feed 变量存在 (如果第一次尝试就失败且没重试)
         logger.error(f"未能成功获取并解析 RSS 源: {feed_name}")
+        # 尝试使用crawl4ai作为备用方案
+        if CRAWL4AI_AVAILABLE and crawl4ai.is_available_as_fallback():
+            logger.info(f"传统方法失败，尝试使用crawl4ai作为备用方案获取RSS源: {feed_name}")
+            try:
+                result = crawl4ai.crawl_rss(feed_url, as_fallback=True)
+                if result["success"] and result["html"]:
+                    # 使用crawl4ai获取的HTML内容解析RSS
+                    feed = feedparser.parse(result["html"])
+                    logger.info(f"crawl4ai备用方案成功获取RSS源: {feed_name}")
+                    
+                    # 直接跳转到RSS解析处理
+                    _process_rss_feed(feed, feed_name, feed_url, days, cutoff_time, current_time, all_articles)
+                    return
+                else:
+                    logger.warning(f"crawl4ai备用方案也失败: {feed_name}, 错误: {result.get('error', '未知错误')}")
+            except Exception as e:
+                logger.error(f"crawl4ai备用方案出错: {feed_name}, 错误: {str(e)}")
+        
         return
     
+    # 处理RSS feed
+    _process_rss_feed(feed, feed_name, feed_url, days, cutoff_time, current_time, all_articles)
+
+
+def _process_rss_feed(feed, feed_name, feed_url, days, cutoff_time, current_time, all_articles):
+    """
+    处理已解析的RSS feed，提取文章信息
+    """
     if feed.bozo:  # 检查feed解析是否有错误
         logger.warning(f"RSS源 {feed_name} 解析警告: {feed.bozo_exception}")
     
@@ -166,6 +257,7 @@ def _process_single_rss(feed_url, feed_name, headers, days, cutoff_time, current
         is_atom_format = True
         logger.info(f"检测到Atom格式的RSS源: {feed_name}")
     
+    articles_count = 0
     for entry in feed.entries:
         try:
             # 使用修复后的时间解析函数

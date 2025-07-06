@@ -6,6 +6,7 @@
 
 ## 🔧 最近更新
 
+- **新增JavaScript渲染网站支持**: 智能识别和处理需要JavaScript渲染的网站（如掘金等），自动检测动态内容并提供友好的错误提示，支持crawl4ai备用方案处理此类网站
 - **修复UTF-8字节长度计算问题**: 解决了webhook推送时中文字符长度计算错误导致的推送失败问题，现在正确按照UTF-8字节长度（中文字符3字节）进行4096字节限制检查
 - **完善测试文件目录结构**: 修复了测试文件保存到错误目录的问题，现在所有数据文件都按照设计的目录结构正确保存
 - **优化内容压缩策略**: 当内容超过字节长度限制时，智能减少关联ID数量和新闻条目数量，确保推送成功
@@ -17,6 +18,14 @@
     - **支持通过配置文件 `config/config.py` 中的 `RSS_FEEDS` 列表订阅多个RSS源**
       - 微信公众号文章通过 [wewe-rss](https://github.com/cooderl/wewe-rss) 项目转换为RSS源
     - **集成特定Twitter Feed** (通过 [x-kit](https://github.com/tuber0613/x-kit) 项目获取指定账号的推文 - 默认获取近2天，处理时筛选近24小时)
+- **增强爬取策略**：
+    - **JavaScript渲染网站支持**：智能识别需要JavaScript渲染的网站（如掘金、Vue.js官网等），自动使用适当的爬取策略
+    - **支持 Crawl4AI 集成**：可选择使用 [Crawl4AI](https://docs.crawl4ai.com/) 服务进行高级网页爬取，在反爬虫、RSS内容提取和JavaScript渲染方面有显著优势
+    - **智能回退机制**：根据 `CRAWL4AI_ENABLED` 环境变量决定优先级
+      - `CRAWL4AI_ENABLED=true`：Crawl4AI（主要方案）→ 传统方法（回退）→ Crawl4AI（备用方案）
+      - `CRAWL4AI_ENABLED=false` 或未设置：传统方法（主要方案）→ Crawl4AI（备用方案，如果配置了API参数）
+    - **动态内容检测**：自动检测页面是否依赖JavaScript渲染，并在crawl4ai不可用时提供友好的错误提示
+    - **RSS 内容增强**：自动检测内容过短的RSS源（如机器之心、OpenAI等），使用 Crawl4AI 获取完整文章内容
 - **智能内容处理**：
     - 使用 `cloudscraper` 尝试绕过部分网站的Cloudflare保护获取RSS内容
     - **尝试从RSS Feed中预提取内容** (如 `content:encoded`)，减少后续网页抓取需求
@@ -55,9 +64,10 @@
 │   ├── config.py       # 主要配置文件 (包含 SOURCE_NAME_MAP, RSS_FEEDS 等)
 │   └── __init__.py
 ├── crawler/            # 数据爬取模块
-│   ├── data_collector.py  # 热点、RSS、Twitter数据收集 (包括RSS内容预提取)
-│   ├── rss_parser.py      # RSS条目解析辅助函数
-│   └── web_crawler.py     # 网页内容爬取 (包括提取时间戳)
+│   ├── crawl4ai_integration.py  # Crawl4AI 服务集成模块
+│   ├── data_collector.py       # 热点、RSS、Twitter数据收集 (包括RSS内容预提取)
+│   ├── rss_parser.py           # RSS条目解析辅助函数
+│   └── web_crawler.py          # 网页内容爬取 (包括提取时间戳)
 │   └── __init__.py
 ├── data/               # 数据存储目录 (默认被.gitignore忽略)
 │   ├── error_logs/     # 错误通知日志
@@ -144,6 +154,13 @@ GEMINI_MODEL_NAME="gemini-2.0-flash-exp"  # Gemini模型名称
 
 # 腾讯混元配置 (用于单条摘要生成)
 HUNYUAN_API_KEY="your_hunyuan_api_key"    # 腾讯混元大模型API密钥 (如果SKIP_CONTENT=false且来源非Twitter则可能需要)
+
+# --- Crawl4AI 配置 (可选，增强爬取策略，处理JavaScript渲染网站必需) ---
+CRAWL4AI_ENABLED="true"                   # 启用 Crawl4AI 爬取策略
+CRAWL4AI_API_URL="http://crawl.tuber.cc"  # Crawl4AI 服务地址
+CRAWL4AI_API_TOKEN="sk-tuber0613kobezhao" # Crawl4AI API 密钥
+CRAWL4AI_TIMEOUT="30"                     # 请求超时时间(秒)
+CRAWL4AI_MAX_RETRIES="3"                  # 最大重试次数
 
 # --- 推送渠道 (至少配置一种，或配置下面的 WEBHOOK_URL 作为备选) ---
 # 以企业微信机器人为例
@@ -350,14 +367,57 @@ python hot_news_main.py
    - `401 Unauthorized`: API密钥无效或格式错误
    - `403 Forbidden`: API密钥权限不足或未激活
 
-### 7. 如何解决 Cloudflare 保护导致的 RSS 获取失败?
+### 7. 为什么某些网站显示"此网页需要JavaScript渲染，请配置crawl4ai服务以获取完整内容"？
+
+这种情况通常出现在访问现代化的单页应用（SPA）或使用JavaScript动态加载内容的网站时：
+
+**常见的JavaScript渲染网站**：
+- 掘金 (juejin.cn) - 技术社区
+- Vue.js、React.js、Angular.io 官网
+- 许多现代化的技术博客和文档站点
+
+**解决方案**：
+
+**方案1: 将Crawl4AI设置为主要方案**（推荐）
+```bash
+CRAWL4AI_ENABLED=true
+CRAWL4AI_API_URL=http://your-crawl4ai-service
+CRAWL4AI_API_TOKEN=your-token
+```
+- 优先级：Crawl4AI → 传统方法（失败时回退）→ Crawl4AI备用方案（传统方法失败时）
+
+**方案2: 将Crawl4AI设置为备用方案**
+```bash
+CRAWL4AI_ENABLED=false  # 或者不设置此变量
+CRAWL4AI_API_URL=http://your-crawl4ai-service
+CRAWL4AI_API_TOKEN=your-token
+```
+- 优先级：传统方法（主要方案）→ Crawl4AI备用方案（传统方法失败时）
+
+**方案3: 完全禁用Crawl4AI**
+```bash
+# 不设置任何CRAWL4AI_*变量
+```
+- 优先级：仅使用传统方法，JavaScript渲染网站将显示友好错误提示
+
+**重要说明**：
+- `CRAWL4AI_ENABLED=true` 决定是否将Crawl4AI作为**主要方案**
+- 即使 `CRAWL4AI_ENABLED=false`，只要配置了API参数，系统仍会在需要时将Crawl4AI作为**备用方案**
+- 对于JavaScript渲染网站，系统会更积极地尝试使用Crawl4AI（无论是主要方案还是备用方案）
+
+**系统的智能处理**：
+- 自动识别需要JavaScript渲染的网站（基于域名）
+- 检测页面是否包含JavaScript渲染指示器
+- 在无法处理时提供明确的错误提示，而不是显示误导性的内容
+
+### 8. 如何解决 Cloudflare 保护导致的 RSS 获取失败?
 
 *   程序已使用 `cloudscraper` 库尝试模拟浏览器行为绕过简单的 Cloudflare 检查。
 *   对于需要复杂验证（如JS挑战、验证码）的站点，`cloudscraper` 可能仍然失败。日志中会记录相关警告。
 *   此外，程序会尝试从RSS Feed本身提取 `content:encoded` 等字段，如果成功，即使后续抓取失败也可能有内容。
 *   目前没有完美的通用解决方案，可以尝试寻找该站点的其他RSS源或联系站点管理员。
 
-### 8. 错误通知系统是如何工作的?
+### 9. 错误通知系统是如何工作的?
 
 *   **独立通道**: 错误通知使用与正常推送完全独立的通道，避免用户被错误信息打扰。
 *   **智能分类**: 根据错误严重程度自动分类：
@@ -367,7 +427,7 @@ python hot_news_main.py
 *   **支持的渠道**: 企业微信机器人、Telegram机器人、自定义Webhook等。
 *   **测试方法**: 运行 `python tests/test_error_notification.py` 测试错误通知功能。
 
-### 9. 如何配置错误通知渠道?
+### 10. 如何配置错误通知渠道?
 
 在 `.env` 文件中配置以下变量（选择一种或多种）：
 
@@ -388,7 +448,7 @@ ERROR_WEBHOOK_URL=your_error_webhook_url
 
 **重要**: 错误通知渠道应与正常推送渠道分离，建议使用不同的机器人或群组。
 
-### 10. 为什么之前会出现 "markdown内容超长(>4096字符)" 的推送失败？
+### 11. 为什么之前会出现 "markdown内容超长(>4096字符)" 的推送失败？
 
 这是由于之前的代码在检查内容长度时使用了不正确的字符长度计算方式导致的：
 

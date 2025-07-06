@@ -193,6 +193,14 @@ def safe_main():
         logger.info(f"筛选后保留 {len(recent_tweets)}/{len(twitter_feed_raw)} 条最近24小时的推文。")
     # --- 结束：获取 Twitter Feed ---
     
+    # 给每个数据项添加来源类型标识
+    for item in hotspots:
+        item['data_source_type'] = 'hotspot'
+    for item in rss_articles:
+        item['data_source_type'] = 'rss'
+    for item in recent_tweets:
+        item['data_source_type'] = 'twitter'
+    
     # 合并热点、RSS文章和过滤后的推文
     all_content = hotspots + rss_articles + recent_tweets # 添加 recent_tweets
     logger.info(f"合并后共有 {len(all_content)} 条内容 (包括推文)")
@@ -241,7 +249,58 @@ def safe_main():
     # --- 新增：基于标题去重，优先保留 RSS 和 Twitter --- 
     logger.info(f"开始基于标题去重 (保留RSS/Twitter优先)，处理前数量: {len(all_content_with_summary)}")
     seen_titles = {}
-    preferred_sources = {"RSS", "Twitter"} # 确认这些是 data_collector 中使用的准确来源名称
+    # 定义优先级：rss > twitter > hotspot
+    source_priority = {'rss': 3, 'twitter': 2, 'hotspot': 1}
+    
+    def get_source_priority(item):
+        """获取数据源优先级"""
+        data_source_type = item.get('data_source_type', 'unknown')
+        return source_priority.get(data_source_type, 0)
+    
+    def normalize_title(title):
+        """标准化标题，用于更好的去重匹配"""
+        if not title:
+            return ""
+        # 移除多余的空格和常见的标点符号
+        import re
+        normalized = re.sub(r'\s+', ' ', title.strip())  # 统一空格
+        normalized = re.sub(r'[，。！？：；""''「」（）()【】\[\]…—]', '', normalized)  # 移除标点符号
+        return normalized.lower()
+    
+    def titles_are_similar(title1, title2, min_prefix_length=30):
+        """判断两个标题是否相似"""
+        # 如果完全相同
+        if title1 == title2:
+            return True
+            
+        # 标准化后比较
+        norm1 = normalize_title(title1)
+        norm2 = normalize_title(title2)
+        
+        if norm1 == norm2:
+            return True
+            
+        # 如果两个标题都足够长，比较前缀
+        if len(norm1) >= min_prefix_length and len(norm2) >= min_prefix_length:
+            prefix1 = norm1[:min_prefix_length]
+            prefix2 = norm2[:min_prefix_length]
+            return prefix1 == prefix2
+            
+        # 对于较短的标题，比较80%的相似度
+        if len(norm1) < min_prefix_length or len(norm2) < min_prefix_length:
+            shorter_len = min(len(norm1), len(norm2))
+            if shorter_len > 10:  # 至少10个字符
+                match_len = int(shorter_len * 0.8)
+                return norm1[:match_len] == norm2[:match_len]
+                
+        return False
+    
+    def find_similar_title(title, seen_titles):
+        """在已存在的标题中查找相似的标题"""
+        for existing_title in seen_titles.keys():
+            if titles_are_similar(title, existing_title):
+                return existing_title
+        return None
     
     for item in all_content_with_summary:
         title = item.get("title", "").strip()
@@ -249,21 +308,35 @@ def safe_main():
             continue
             
         current_source = item.get("source", "")
-    
-        if title not in seen_titles:
+        current_data_source_type = item.get('data_source_type', 'unknown')
+        
+        # 查找相似的标题
+        similar_title = find_similar_title(title, seen_titles)
+        
+        if similar_title is None:
+            # 没有找到相似的标题，直接添加
             seen_titles[title] = item
         else:
-            existing_item = seen_titles[title]
+            # 找到相似的标题，进行优先级比较
+            existing_item = seen_titles[similar_title]
             existing_source = existing_item.get("source", "")
+            existing_data_source_type = existing_item.get('data_source_type', 'unknown')
             
-            # 如果当前条目来源是优先来源，且已存在的条目来源不是优先来源，则替换
-            if current_source in preferred_sources and existing_source not in preferred_sources:
-                logger.debug(f"去重：替换 '{title}' (来自 {existing_source}) 为来自优先源 {current_source}")
+            current_priority = get_source_priority(item)
+            existing_priority = get_source_priority(existing_item)
+            
+            # 如果当前条目优先级更高，则替换
+            if current_priority > existing_priority:
+                logger.debug(f"去重：替换相似标题 '{similar_title}' (来自 {existing_data_source_type}:{existing_source}) 为 '{title}' (来自更高优先级 {current_data_source_type}:{current_source})")
+                # 删除旧的标题，添加新的
+                del seen_titles[similar_title]
                 seen_titles[title] = item
-            # 如果两者都是优先来源，或都不是，保留先遇到的那个（目前逻辑）
-            # 可以根据需要添加更复杂的优先级，例如 RSS 优先于 Twitter
-            # else:
-            #    logger.debug(f"去重：保留 '{title}' (来自 {existing_source}), 忽略来自 {current_source}")
+            # 如果优先级相同，保留先遇到的那个
+            elif current_priority == existing_priority:
+                logger.debug(f"去重：保留相似标题 '{similar_title}' (来自 {existing_data_source_type}:{existing_source}), 忽略 '{title}' (来自同级 {current_data_source_type}:{current_source})")
+            # 如果当前条目优先级较低，保留已存在的
+            else:
+                logger.debug(f"去重：保留相似标题 '{similar_title}' (来自高优先级 {existing_data_source_type}:{existing_source}), 忽略 '{title}' (来自低优先级 {current_data_source_type}:{current_source})")
                 
     deduplicated_content = list(seen_titles.values())
     logger.info(f"去重后剩余数量: {len(deduplicated_content)}")
@@ -298,17 +371,47 @@ def safe_main():
                                              deepseek_url, model_id, tech_only=tech_only)
         
         # 检查总结结果是否有效
-        invalid_keywords = ["失败", "错误", "API错误", "API密钥", "地理位置限制", "认证失败", "权限不足", "请求错误", "连接失败", "解析Gemini返回的JSON失败", "解析DeepSeek返回的JSON失败"]
+        # 修改验证逻辑：使用更精确的错误检测，避免误判新闻内容中的关键词
+        specific_error_keywords = [
+            "API错误", "API密钥", "地理位置限制", "认证失败", "权限不足", "请求错误", "连接失败", 
+            "解析Gemini返回的JSON失败", "解析DeepSeek返回的JSON失败",
+            "模型调用失败", "服务不可用", "配额不足", "请求超时"
+        ]
+        
+        # 检查是否为明显的错误格式（通常错误信息比较简短且直接）
+        error_patterns = [
+            "失败：",  # 以"失败："开头的错误信息
+            "错误：",  # 以"错误："开头的错误信息
+            "Error:",  # 英文错误信息
+            "Exception:",  # 异常信息
+        ]
         
         is_error_response = False
         if not summary or summary.strip() == "":
             is_error_response = True
         else:
-            # 检查是否包含错误关键词
-            for keyword in invalid_keywords:
+            # 检查是否包含特定的API错误关键词
+            for keyword in specific_error_keywords:
                 if keyword in summary:
                     is_error_response = True
                     break
+            
+            # 检查是否符合错误信息的格式模式
+            if not is_error_response:
+                summary_lower = summary.lower()
+                for pattern in error_patterns:
+                    if pattern.lower() in summary_lower:
+                        is_error_response = True
+                        break
+            
+            # 如果总结过短（少于50个字符），可能是错误信息
+            if not is_error_response and len(summary.strip()) < 50:
+                # 检查是否包含错误相关词汇且内容很短
+                short_error_keywords = ["失败", "错误", "无法", "不能"]
+                for keyword in short_error_keywords:
+                    if keyword in summary:
+                        is_error_response = True
+                        break
         
         if is_error_response:
             raise Exception(f"AI总结返回无效或错误结果: {summary}")

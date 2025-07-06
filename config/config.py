@@ -16,6 +16,13 @@ DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
 HUNYUAN_API_KEY = os.getenv('HUNYUAN_API_KEY')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
+# Crawl4AI 配置
+CRAWL4AI_ENABLED = os.getenv('CRAWL4AI_ENABLED', 'false').lower() == 'true'
+CRAWL4AI_API_URL = os.getenv('CRAWL4AI_API_URL', 'http://crawl.tuber.cc')
+CRAWL4AI_API_TOKEN = os.getenv('CRAWL4AI_API_TOKEN', 'sk-tuber0613kobezhao')
+CRAWL4AI_TIMEOUT = int(os.getenv('CRAWL4AI_TIMEOUT', '20'))
+CRAWL4AI_MAX_RETRIES = int(os.getenv('CRAWL4AI_MAX_RETRIES', '2'))
+
 # 总结模型选择 (支持: deepseek, gemini)
 SUMMARY_MODEL = os.getenv('SUMMARY_MODEL', 'deepseek')
 GEMINI_MODEL_NAME = os.getenv('GEMINI_MODEL_NAME', 'gemini-2.0-flash-exp')
@@ -42,10 +49,10 @@ RSS_DAYS = int(os.getenv('RSS_DAYS', '1'))
 
 # RSS源列表
 RSS_FEEDS = [
-    # {
-    #     'name': 'OpenAI Blog',
-    #     'url': 'https://openai.com/blog/rss.xml'
-    # },
+    {
+        'name': 'OpenAI Blog',
+        'url': 'https://openai.com/blog/rss.xml'
+    },
     {
         'name': '机器之心',
         'url': 'https://www.jiqizhixin.com/rss'

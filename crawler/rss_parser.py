@@ -12,6 +12,14 @@ from typing import Dict, Any, Optional, List, Union
 
 logger = logging.getLogger(__name__)
 
+# 尝试导入crawl4ai集成模块
+try:
+    from crawler.crawl4ai_integration import crawl4ai
+    CRAWL4AI_AVAILABLE = True
+except ImportError:
+    CRAWL4AI_AVAILABLE = False
+    logger.warning("无法导入crawl4ai集成模块，将使用传统方法")
+
 
 def extract_rss_entry(entry: Any, feed: Any = None, feed_url: str = "") -> Dict[str, Any]:
     """
@@ -51,7 +59,11 @@ def extract_rss_entry(entry: Any, feed: Any = None, feed_url: str = "") -> Dict[
     # 5. 提取内容
     result["content"] = _extract_content(entry)
     
-    # 6. 提取摘要
+    # 6. 使用crawl4ai增强内容获取
+    if CRAWL4AI_AVAILABLE and crawl4ai.is_enabled():
+        result["content"] = _enhance_content_with_crawl4ai(entry, result["content"], result["link"])
+    
+    # 7. 提取摘要
     result["summary"] = _extract_summary(entry)
     
     return result
@@ -257,6 +269,94 @@ def _extract_content(entry: Any) -> str:
                 return source_value
     
     return ""
+
+
+def _enhance_content_with_crawl4ai(entry: Any, existing_content: str, article_url: str) -> str:
+    """
+    使用crawl4ai增强内容获取
+    
+    参数:
+        entry: RSS条目
+        existing_content: 现有内容
+        article_url: 文章链接
+        
+    返回:
+        增强后的内容
+    """
+    if not CRAWL4AI_AVAILABLE:
+        return existing_content
+    
+    # 检查是否可以使用crawl4ai（优先使用启用状态，备用方案检查配置）
+    can_use_crawl4ai = crawl4ai.is_enabled() or crawl4ai.is_available_as_fallback()
+    if not can_use_crawl4ai:
+        return existing_content
+    
+    # 判断是否需要使用crawl4ai增强内容
+    should_enhance = False
+    
+    # 1. 内容过短（少于100字符）
+    if len(existing_content.strip()) < 100:
+        should_enhance = True
+        logger.info(f"内容过短({len(existing_content)}字符)，使用crawl4ai增强: {article_url}")
+    
+    # 2. 特殊RSS源（已知内容获取困难的源）
+    problem_domains = [
+        "jiqizhixin.com",  # 机器之心
+        "openai.com",      # OpenAI
+        "deepmind.google", # Google DeepMind
+        "research.facebook.com", # Meta Research
+        "marktechpost.com", # MarkTechPost
+    ]
+    
+    for domain in problem_domains:
+        if domain in article_url:
+            should_enhance = True
+            logger.info(f"检测到问题域名({domain})，使用crawl4ai增强: {article_url}")
+            break
+    
+    # 3. 内容看起来像是截断的（以...结尾或包含"阅读全文"等关键词）
+    if existing_content and (
+        existing_content.strip().endswith("...") or 
+        existing_content.strip().endswith("…") or
+        "阅读全文" in existing_content or
+        "Read more" in existing_content or
+        "查看原文" in existing_content
+    ):
+        should_enhance = True
+        logger.info(f"内容疑似截断，使用crawl4ai增强: {article_url}")
+    
+    if not should_enhance:
+        return existing_content
+    
+    # 使用crawl4ai获取完整内容
+    if not article_url:
+        logger.warning("文章链接为空，无法使用crawl4ai增强")
+        return existing_content
+    
+    try:
+        # 根据优先级决定调用方式
+        is_fallback = not crawl4ai.is_enabled()
+        if is_fallback:
+            logger.info(f"开始使用crawl4ai作为备用方案增强内容: {article_url}")
+        else:
+            logger.info(f"开始使用crawl4ai增强内容: {article_url}")
+        
+        result = crawl4ai.crawl_webpage(article_url, anti_bot=True, as_fallback=is_fallback)
+        
+        if result["success"] and result["content"]:
+            enhanced_content = result["content"]
+            method = "备用方案" if is_fallback else "主要方案"
+            logger.info(f"crawl4ai增强成功({method}): {article_url}, 原内容{len(existing_content)}字符 -> 增强后{len(enhanced_content)}字符")
+            return enhanced_content
+        else:
+            method = "备用方案" if is_fallback else "主要方案"
+            logger.warning(f"crawl4ai增强失败({method}): {article_url}, 错误: {result.get('error', '未知错误')}")
+            return existing_content
+            
+    except Exception as e:
+        method = "备用方案" if is_fallback else "主要方案"
+        logger.error(f"使用crawl4ai增强内容时出错({method}): {article_url}, 错误: {str(e)}")
+        return existing_content
 
 
 def _extract_summary(entry: Any) -> str:
