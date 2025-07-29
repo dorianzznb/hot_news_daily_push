@@ -9,6 +9,7 @@ import os
 import sys
 import asyncio
 import logging
+import gc  # 添加垃圾回收模块
 from datetime import datetime, timedelta
 from distutils.util import strtobool
 
@@ -47,11 +48,77 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def force_garbage_collection(stage_name=""):
+    """
+    强制执行垃圾回收并记录内存使用情况
+    """
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        before_memory = process.memory_info().rss / 1024 / 1024  # MB
+        
+        # 强制垃圾回收
+        collected = gc.collect()
+        
+        after_memory = process.memory_info().rss / 1024 / 1024  # MB
+        freed_memory = before_memory - after_memory
+        
+        logger.info(f"🧹 内存清理 {stage_name}: 回收 {collected} 个对象, "
+                   f"内存从 {before_memory:.1f}MB 降至 {after_memory:.1f}MB "
+                   f"(释放 {freed_memory:.1f}MB)")
+        
+        return after_memory
+    except ImportError:
+        # 如果没有psutil，只执行垃圾回收
+        collected = gc.collect()
+        logger.info(f"🧹 内存清理 {stage_name}: 回收 {collected} 个对象")
+        return None
+
+def cleanup_variables(*variables):
+    """
+    清理变量并设置为None
+    """
+    for var_name, var_value in variables:
+        if var_value is not None:
+            try:
+                if hasattr(var_value, 'clear') and callable(var_value.clear):
+                    var_value.clear()
+                del var_value
+                logger.debug(f"已清理变量: {var_name}")
+            except Exception as e:
+                logger.debug(f"清理变量 {var_name} 时出错: {str(e)}")
+
 def safe_main():
     """
     安全的主函数，包含完整的错误处理和通知机制
     当出现致命错误时发送错误通知而不是正常推送
     """
+    # 初始内存检查
+    initial_memory = force_garbage_collection("程序启动")
+    
+    # 动态优化缓存设置
+    try:
+        from utils.utils import optimize_cache_settings
+        cache_settings = optimize_cache_settings()
+        logger.info(f"📊 动态缓存设置: 最大缓存大小={cache_settings['max_cache_size']}, "
+                   f"清理天数={cache_settings['cleanup_days']}")
+        
+        # 更新全局缓存设置
+        import utils.utils as utils_module
+        utils_module.MAX_CACHE_SIZE = cache_settings['max_cache_size']
+        utils_module.CACHE_CLEANUP_DAYS = cache_settings['cleanup_days']
+        
+    except Exception as opt_err:
+        logger.warning(f"动态缓存优化失败，使用默认设置: {opt_err}")
+    
+    # 检测当前内存使用情况
+    try:
+        from utils.utils import get_memory_usage
+        memory_info = get_memory_usage()
+        logger.info(f"💾 当前内存使用: RSS={memory_info['rss_mb']:.1f}MB, VMS={memory_info['vms_mb']:.1f}MB")
+    except Exception as mem_err:
+        logger.warning(f"获取内存信息失败: {mem_err}")
+    
     # 从环境变量中读取配置，优先使用环境变量，如果不存在则使用config.py中的默认值
     tech_only = bool(strtobool(os.getenv('TECH_ONLY', 'False')))
     webhook = os.getenv('WEBHOOK_URL', WEBHOOK_URL)
@@ -142,6 +209,7 @@ def safe_main():
     sources = TECH_SOURCES if tech_only else ALL_SOURCES
     
     # 收集热点
+    logger.info("🚀 开始收集热点数据...")
     hotspots = collect_all_hotspots(sources, base_url)
     
     if not hotspots:
@@ -159,11 +227,16 @@ def safe_main():
     if hotspots:
         save_hotspots_to_jsonl(hotspots, directory=os.path.join("data", "filtered"))
     
+    # 第一次内存清理（热点数据收集后）
+    force_garbage_collection("热点数据收集后")
+    
     # 获取RSS文章
+    logger.info("📰 开始获取RSS文章...")
     # 优先使用RSS_FEEDS列表，如果为空则使用单个RSS_URL
     rss_articles = fetch_rss_articles(rss_url=rss_url, days=rss_days, rss_feeds=RSS_FEEDS)
     
     # --- 新增：获取 Twitter Feed ---
+    logger.info("🐦 开始获取Twitter数据...")
     twitter_feed_raw = fetch_twitter_feed(days_to_fetch=2) # 获取最近2天
     
     # 过滤推文，只保留最近1天 (24小时) 的
@@ -193,6 +266,9 @@ def safe_main():
         logger.info(f"筛选后保留 {len(recent_tweets)}/{len(twitter_feed_raw)} 条最近24小时的推文。")
     # --- 结束：获取 Twitter Feed ---
     
+    # 清理原始Twitter数据
+    cleanup_variables(("twitter_feed_raw", twitter_feed_raw))
+    
     # 给每个数据项添加来源类型标识
     for item in hotspots:
         item['data_source_type'] = 'hotspot'
@@ -204,6 +280,9 @@ def safe_main():
     # 合并热点、RSS文章和过滤后的推文
     all_content = hotspots + rss_articles + recent_tweets # 添加 recent_tweets
     logger.info(f"合并后共有 {len(all_content)} 条内容 (包括推文)")
+    
+    # 第二次内存清理（数据合并后）
+    force_garbage_collection("数据收集和合并后")
     
     # 检查合并后是否有内容
     if not all_content:
@@ -221,6 +300,7 @@ def safe_main():
     # 获取网页内容并生成摘要
     if not skip_content:
         try:
+            logger.info("🤖 开始内容处理和摘要生成...")
             # 确保有事件循环
             if asyncio.get_event_loop().is_closed():
                 asyncio.set_event_loop(asyncio.new_event_loop())
@@ -232,6 +312,10 @@ def safe_main():
                                            tech_only, use_cache=not no_cache)
             )
             logger.info(f"已为 {len(all_content_with_summary)} 条内容生成摘要")
+            
+            # 清理原始内容数据
+            cleanup_variables(("all_content", all_content))
+            
         except Exception as e:
             # 内容处理失败时发送错误通知，但不退出程序，使用原始内容继续
             notify_simple_error(
@@ -246,8 +330,11 @@ def safe_main():
         all_content_with_summary = all_content
         logger.info("已跳过获取网页内容和生成摘要步骤")
     
+    # 第三次内存清理（内容处理后）
+    force_garbage_collection("内容处理后")
+    
     # --- 新增：基于标题去重，优先保留 RSS 和 Twitter --- 
-    logger.info(f"开始基于标题去重 (保留RSS/Twitter优先)，处理前数量: {len(all_content_with_summary)}")
+    logger.info(f"🔄 开始基于标题去重 (保留RSS/Twitter优先)，处理前数量: {len(all_content_with_summary)}")
     seen_titles = {}
     # 定义优先级：rss > twitter > hotspot
     source_priority = {'rss': 3, 'twitter': 2, 'hotspot': 1}
@@ -340,10 +427,16 @@ def safe_main():
                 
     deduplicated_content = list(seen_titles.values())
     logger.info(f"去重后剩余数量: {len(deduplicated_content)}")
+    
+    # 清理去重过程中的临时数据
+    cleanup_variables(("all_content_with_summary", all_content_with_summary), ("seen_titles", seen_titles))
+    
+    # 第四次内存清理（去重后）
+    force_garbage_collection("去重处理后")
     # --- 结束：去重逻辑 ---
 
     # --- 新增：保存最终处理和去重后的新闻列表 ---
-    logger.info(f"准备保存处理和去重后的 {len(deduplicated_content)} 条新闻...")
+    logger.info(f"💾 准备保存处理和去重后的 {len(deduplicated_content)} 条新闻...")
     processed_output_dir = os.path.join("data", "processed_output")
     os.makedirs(processed_output_dir, exist_ok=True) # 确保目录存在
     timestamp_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -360,7 +453,7 @@ def safe_main():
     # --- 结束：保存逻辑 ---
     
     # AI总结阶段
-    logger.info("开始AI总结阶段...")
+    logger.info("🤖 开始AI总结阶段...")
     summary = None
     try:
         if summary_model == 'gemini':
@@ -430,8 +523,14 @@ def safe_main():
         logger.error(f"AI总结失败: {str(e)}")
         sys.exit(1)
     
+    # 清理去重内容数据（在AI总结后）
+    cleanup_variables(("deduplicated_content", deduplicated_content))
+    
+    # 第五次内存清理（AI总结后）
+    force_garbage_collection("AI总结后")
+    
     # 推送阶段
-    logger.info("开始推送阶段...")
+    logger.info("📤 开始推送阶段...")
     try:
         # 使用多种方式推送消息
         success = notify(summary, tech_only)
@@ -459,7 +558,7 @@ def safe_main():
         sys.exit(1)
     
     # 清理阶段
-    logger.info("开始清理阶段...")
+    logger.info("🧹 开始清理阶段...")
     try:
         directories_to_clean = [
             "data/raw", "data/filtered", "data/merged", "data/inputs", 
@@ -479,6 +578,12 @@ def safe_main():
             f"清理旧数据时发生错误: {str(e)}",
             "数据清理"
         )
+    
+    # 最终内存清理
+    final_memory = force_garbage_collection("程序结束前")
+    if initial_memory and final_memory:
+        total_freed = initial_memory - final_memory
+        logger.info(f"🎯 程序运行完成，总共释放内存: {total_freed:.1f}MB")
     
     logger.info("🎉 所有处理步骤完成")
 
@@ -511,6 +616,9 @@ def main():
         )
         logger.error(f"程序发生未知异常: {str(e)}")
         sys.exit(1)
+    finally:
+        # 最终清理
+        force_garbage_collection("程序异常退出")
 
 
 if __name__ == "__main__":

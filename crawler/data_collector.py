@@ -512,245 +512,298 @@ def fetch_rss_articles(rss_url=None, days=1, rss_feeds=None):
     current_time = datetime.now()
     cutoff_time = current_time - timedelta(days=days)
     
+    # 导入分批处理配置
+    try:
+        from config.config import RSS_BATCH_SIZE, RSS_BATCH_DELAY
+    except ImportError:
+        RSS_BATCH_SIZE = 5
+        RSS_BATCH_DELAY = 2
+        logger.warning("无法导入RSS分批配置，使用默认值")
+    
     # 如果提供了rss_feeds列表，优先使用它
     if rss_feeds and isinstance(rss_feeds, list) and len(rss_feeds) > 0:
-        logger.info(f"使用RSS源列表，共{len(rss_feeds)}个源")
+        logger.info(f"使用RSS源列表，共{len(rss_feeds)}个源，将按批次处理 (每批{RSS_BATCH_SIZE}个)")
         
-        for feed_info in rss_feeds:
-            try:
-                feed_name = feed_info.get('name', '未知来源')
-                
-                # 处理Twitter等多账号RSS源
-                if feed_name == 'Twitter' and 'accounts' in feed_info:
-                    logger.info(f"处理Twitter多账号RSS源，共{len(feed_info['accounts'])}个账号")
-                    for account in feed_info['accounts']:
-                        account_name = account.get('name', '未知Twitter账号')
-                        account_url = account.get('url')
-                        
-                        if not account_url:
-                            logger.warning(f"Twitter账号 {account_name} 未提供URL，跳过")
-                            continue
-                            
-                        logger.info(f"正在获取Twitter账号: {account_name} ({account_url})")
-                        # 使用相同的RSS处理逻辑，但将source设置为Twitter-账号名
-                        # 移除 self. 并将 feed_name 设为更具体的账号名
-                        _process_single_rss(account_url, f"Twitter-{account_name}", headers, days, cutoff_time, current_time, all_articles)
+        # 分批处理RSS源
+        total_batches = (len(rss_feeds) + RSS_BATCH_SIZE - 1) // RSS_BATCH_SIZE
+        
+        for batch_num in range(total_batches):
+            start_idx = batch_num * RSS_BATCH_SIZE
+            end_idx = min(start_idx + RSS_BATCH_SIZE, len(rss_feeds))
+            batch_feeds = rss_feeds[start_idx:end_idx]
+            
+            logger.info(f"🔄 处理第 {batch_num + 1}/{total_batches} 批RSS源 ({len(batch_feeds)} 个源)")
+            
+            # 处理当前批次的RSS源
+            batch_articles = []
+            for feed_info in batch_feeds:
+                # 为每个RSS源创建独立的Session并确保清理
+                session = None
+                try:
+                    feed_name = feed_info.get('name', '未知来源')
                     
-                    # 跳过后续处理，因为已经处理了所有Twitter账号
-                    continue
-                
-                # 处理常规RSS源
-                feed_url = feed_info.get('url')
-                
-                if not feed_url:
-                    logger.warning(f"RSS源 {feed_name} 未提供URL，跳过")
-                    continue
-                
-                logger.info(f"正在获取RSS源: {feed_name} ({feed_url})")
-                max_retries = 3
-                retry_count = 0
-                retry_delay = 5  # 初始重试延迟（秒）
-                
-                while retry_count < max_retries:
-                    try:
-                        # 先使用requests获取内容，添加增强的请求头避免被拦截
-                        logger.info(f"尝试获取RSS源 {feed_name}，第 {retry_count + 1} 次尝试")
-                        session = requests.Session()
-                        response = session.get(
-                            feed_url, 
-                            headers=headers, 
-                            timeout=20, 
-                            allow_redirects=True,
-                            verify=True  # 验证SSL证书
-                        )
-                        response.raise_for_status()
-                        
-                        # 检查是否返回了CloudFlare验证页面或其他非RSS内容
-                        content_type = response.headers.get('Content-Type', '')
-                        if 'text/html' in content_type and ('cloudflare' in response.text.lower() or 'just a moment' in response.text.lower()):
-                            logger.warning(f"RSS源 {feed_name} 返回了CloudFlare验证页面，无法获取RSS内容")
-                            logger.debug(f"CloudFlare页面内容: {response.text[:200]}...")
-                            raise Exception("遇到CloudFlare保护，需要浏览器环境才能访问")
+                    # 处理Twitter等多账号RSS源
+                    if feed_name == 'Twitter' and 'accounts' in feed_info:
+                        logger.info(f"处理Twitter多账号RSS源，共{len(feed_info['accounts'])}个账号")
+                        for account in feed_info['accounts']:
+                            account_name = account.get('name', '未知Twitter账号')
+                            account_url = account.get('url')
                             
-                        # 使用获取到的内容解析RSS
-                        feed = feedparser.parse(response.content)
-                        break  # 成功获取，跳出重试循环
-                        
-                    except requests.exceptions.RequestException as e:
-                        retry_count += 1
-                        if retry_count < max_retries:
-                            logger.warning(f"RSS源 {feed_name} 访问失败: {str(e)}，{retry_delay}秒后重试 ({retry_count}/{max_retries})")
-                            time.sleep(retry_delay)
-                            retry_delay *= 1.5  # 指数退避策略
-                        else:
-                            logger.error(f"RSS源 {feed_name} 访问失败，已达最大重试次数: {str(e)}")
-                            continue  # 继续处理下一个RSS源
-                    except Exception as e:
-                        retry_count += 1
-                        if retry_count < max_retries:
-                            logger.warning(f"RSS源 {feed_name} 处理时出错: {str(e)}，{retry_delay}秒后重试 ({retry_count}/{max_retries})")
-                            time.sleep(retry_delay)
-                            retry_delay *= 1.5  # 指数退避策略
-                        else:
-                            logger.error(f"RSS源 {feed_name} 处理失败，已达最大重试次数: {str(e)}")
-                            continue  # 继续处理下一个RSS源
-                
-                # 如果达到最大重试次数仍然失败，跳过当前RSS源
-                if retry_count >= max_retries:
-                    logger.error(f"RSS源 {feed_name} 在 {max_retries} 次尝试后仍然失败，跳过")
-                    continue
-                
-                if feed.bozo:  # 检查feed解析是否有错误
-                    logger.warning(f"RSS源 {feed_name} 解析警告: {feed.bozo_exception}")
-                
-                # 检测是否为Atom格式（微信公众号通常使用Atom格式）
-                is_atom_format = False
-                if hasattr(feed, 'namespaces') and 'http://www.w3.org/2005/Atom' in feed.namespaces.values():
-                    is_atom_format = True
-                    logger.info(f"检测到Atom格式的RSS源: {feed_name}")
-                
-                articles_count = 0
-                for entry in feed.entries:
-                    try:
-                        # 使用修复后的时间解析函数
-                        pub_time = _extract_publish_time(entry)
-                        
-                        # 时间过滤逻辑：如果有时间信息，才进行过滤；如果没有时间信息，则保留该条目
-                        should_include = True
-                        if pub_time is not None:
-                            # 只保留最近days天的文章
-                            should_include = pub_time >= cutoff_time
-                            if not should_include:
-                                logger.debug(f"文章时间过旧，跳过: {entry.title if hasattr(entry, 'title') else '未知标题'} @ {pub_time}")
-                        else:
-                            # 如果没有时间信息，标记需要从网页提取
-                            logger.warning(f"RSS条目缺少时间信息，将尝试从网页提取: {entry.title if hasattr(entry, 'title') else '未知标题'}")
-                        
-                        if should_include:
-                            # 使用标准化的RSS解析函数提取信息
-                            entry_data = extract_rss_entry(entry, feed, feed_url)
-                            
-                            # 根据源类型设置不同的source标识
-                            if feed_name.lower().find('公众号') >= 0:
-                                # 如果是公众号类型的源
-                                source = "公众号精选"
-                                if entry_data["author"] != "未知作者":
-                                    # 避免重复：如果feed_name已经包含了author信息，就不重复添加
-                                    if entry_data["author"] not in feed_name:
-                                        source = f"{feed_name}-{entry_data['author']}"
-                                    else:
-                                        source = feed_name  # 直接使用feed_name，避免重复
-                            else:
-                                # 其他技术博客或新闻源
-                                source = feed_name
-                            
-                            # 构建文章数据
-                            article_data = {
-                                "title": entry_data["title"],
-                                "url": entry_data["link"],
-                                "source": source,
-                                "hot": "",
-                                "published": pub_time.strftime("%Y-%m-%d %H:%M:%S") if pub_time else "",
-                                "needs_time_extraction": pub_time is None  # 标记是否需要从网页提取时间
-                            }
-                            
-                            content_found = False
-                            # --- 优先尝试获取 content ---
-                            # 1. 从 entry_data 获取预解析的 content (如果有)
-                            if entry_data.get("content"):
-                                content_value = entry_data["content"]
-                                # 基本清理 (去除CDATA)
-                                if isinstance(content_value, str) and content_value.startswith('<![CDATA[') and content_value.endswith(']]>'):
-                                    content_value = content_value[9:-3]
-                                if content_value and len(content_value.strip()) > 20:
-                                    article_data["content"] = content_value
-                                    logger.info(f"从 entry_data 获取到 content: {entry_data['title'][:30]}...")
-                                    content_found = True
-                            
-                            # 2. 检查 content:encoded (如果上面没找到)
-                            if not content_found:
-                                # ... (Existing complex logic for finding content_encoded, using BeautifulSoup might simplify this)
-                                # Example simplification: Let BeautifulSoup handle finding content-like tags
-                                potential_content_html = ""
-                                if hasattr(entry, 'content_encoded'): potential_content_html = entry.content_encoded
-                                elif hasattr(entry, 'content'): # Check standard content field too
-                                    if isinstance(entry.content, list) and entry.content:
-                                        cont = entry.content[0]
-                                        if isinstance(cont, dict) and 'value' in cont: potential_content_html = cont.value
-                                        elif hasattr(cont, 'value'): potential_content_html = cont.value
-                                        else: potential_content_html = str(cont)
+                            if not account_url:
+                                logger.warning(f"Twitter账号 {account_name} 未提供URL，跳过")
+                                continue
                                 
-                                if potential_content_html and isinstance(potential_content_html, str):
-                                    # Basic clean (CDATA)
-                                    if potential_content_html.startswith('<![CDATA[') and potential_content_html.endswith(']]>'):
-                                        potential_content_html = potential_content_html[9:-3]
-                                    # Use BeautifulSoup to get cleaner text if needed, or store raw HTML if long enough
-                                    if len(potential_content_html.strip()) > 100: # Heuristic for actual content vs short descriptions
-                                        article_data["content"] = potential_content_html
-                                        logger.info(f"从 RSS content/content_encoded 获取到较长内容: {entry_data['title'][:30]}...")
-                                    content_found = True
+                            logger.info(f"正在获取Twitter账号: {account_name} ({account_url})")
+                            # 使用相同的RSS处理逻辑，但将source设置为Twitter-账号名
+                            # 移除 self. 并将 feed_name 设为更具体的账号名
+                            _process_single_rss(account_url, f"Twitter-{account_name}", headers, days, cutoff_time, current_time, batch_articles)
                         
-                            # --- 获取并清理 summary (用作 desc) ---
-                            raw_summary = entry_data.get("summary", "")
-                            cleaned_summary_text = ""
-                            is_summary_valid = False # Flag to track validity
-                            if raw_summary and isinstance(raw_summary, str):
-                                try:
-                                    # 使用BeautifulSoup去除HTML标签
-                                    soup = BeautifulSoup(raw_summary, 'html.parser')
-                                    cleaned_summary_text = soup.get_text(strip=True)
-                                except Exception as parse_err:
-                                    logger.warning(f"解析摘要HTML时出错 for {entry_data['title'][:30]}: {parse_err}. 使用原始摘要.")
-                                    # cleaned_summary_text = raw_summary # Fallback removed, prefer AI summary if parsing fails
-
-                            # 检查清理后的文本是否有效 (不太短, 不像链接)
-                            MIN_DESC_LENGTH = 10
-                            if cleaned_summary_text and \
-                                len(cleaned_summary_text) > MIN_DESC_LENGTH and \
-                                not cleaned_summary_text.startswith("点击查看原文") and \
-                                "href=" not in cleaned_summary_text[:20]: # Added heuristic check for links
-
-                                article_data["desc"] = cleaned_summary_text
-                                is_summary_valid = True
-                                logger.info(f"从 RSS summary 获取到有效 desc (可能较长, len={len(cleaned_summary_text)}): {entry_data['title'][:30]}...")
-                            
-                            # Log reason for invalidity if parsing succeeded but checks failed
-                            if not is_summary_valid and cleaned_summary_text:
-                                if len(cleaned_summary_text) <= MIN_DESC_LENGTH:
-                                    reason = "太短"
-                                elif cleaned_summary_text.startswith("点击查看原文") or "href=" in cleaned_summary_text[:20]:
-                                    reason = "像链接或固定文本"
-                                else: # Ensure this else aligns correctly
-                                    reason = "未知原因(非太短/非链接)" # More specific reason
-                                logger.info(f"RSS summary 无效 ({reason})，将不使用: '{cleaned_summary_text[:50]}...' for {entry_data['title'][:30]}")
-                            elif not is_summary_valid and not cleaned_summary_text: # Align elif correctly
-                                logger.info(f"RSS summary 为空或解析失败 for {entry_data['title'][:30]}")
-
-                            all_articles.append(article_data)
-                            articles_count += 1
-
-                    except Exception as entry_err: # Catch errors for this specific entry
-                        # Log error with entry link if available
-                        entry_link = "N/A"
-                        if hasattr(entry, 'link'):
-                            entry_link = entry.link
-                        elif hasattr(entry, 'get'):
-                            entry_link = entry.get('link', 'N/A')
-
-                        logger.error(f"处理 RSS 源 '{feed_name}' 的条目时出错: {entry_err}. Entry URL: {entry_link}")
-                        # Continue to the next entry
+                        # 跳过后续处理，因为已经处理了所有Twitter账号
                         continue
+                    
+                    # 处理常规RSS源
+                    feed_url = feed_info.get('url')
+                    
+                    if not feed_url:
+                        logger.warning(f"RSS源 {feed_name} 未提供URL，跳过")
+                        continue
+                    
+                    logger.info(f"正在获取RSS源: {feed_name} ({feed_url})")
+                    max_retries = 3
+                    retry_count = 0
+                    retry_delay = 5  # 初始重试延迟（秒）
+                    
+                    while retry_count < max_retries:
+                        try:
+                            # 先使用requests获取内容，添加增强的请求头避免被拦截
+                            logger.info(f"尝试获取RSS源 {feed_name}，第 {retry_count + 1} 次尝试")
+                            
+                            # 创建新的Session（如果还没有创建或之前的Session已关闭）
+                            if session is None:
+                                session = requests.Session()
+                                session.headers.update(headers)
+                            
+                            response = session.get(
+                                feed_url, 
+                                timeout=20, 
+                                allow_redirects=True,
+                                verify=True  # 验证SSL证书
+                            )
+                            response.raise_for_status()
+                            
+                            # 检查是否返回了CloudFlare验证页面或其他非RSS内容
+                            content_type = response.headers.get('Content-Type', '')
+                            if 'text/html' in content_type and ('cloudflare' in response.text.lower() or 'just a moment' in response.text.lower()):
+                                logger.warning(f"RSS源 {feed_name} 返回了CloudFlare验证页面，无法获取RSS内容")
+                                logger.debug(f"CloudFlare页面内容: {response.text[:200]}...")
+                                raise Exception("遇到CloudFlare保护，需要浏览器环境才能访问")
+                                
+                            # 使用获取到的内容解析RSS
+                            feed = feedparser.parse(response.content)
+                            break  # 成功获取，跳出重试循环
+                            
+                        except requests.exceptions.RequestException as e:
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                logger.warning(f"RSS源 {feed_name} 访问失败: {str(e)}，{retry_delay}秒后重试 ({retry_count}/{max_retries})")
+                                time.sleep(retry_delay)
+                                retry_delay *= 1.5  # 指数退避策略
+                            else:
+                                logger.error(f"RSS源 {feed_name} 访问失败，已达最大重试次数: {str(e)}")
+                                break  # 跳出重试循环，继续处理下一个RSS源
+                        except Exception as e:
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                logger.warning(f"RSS源 {feed_name} 处理时出错: {str(e)}，{retry_delay}秒后重试 ({retry_count}/{max_retries})")
+                                time.sleep(retry_delay)
+                                retry_delay *= 1.5  # 指数退避策略
+                            else:
+                                logger.error(f"RSS源 {feed_name} 处理失败，已达最大重试次数: {str(e)}")
+                                break  # 跳出重试循环，继续处理下一个RSS源
+                    
+                    # 如果达到最大重试次数仍然失败，跳过当前RSS源
+                    if retry_count >= max_retries:
+                        logger.error(f"RSS源 {feed_name} 在 {max_retries} 次尝试后仍然失败，跳过")
+                        continue
+                    
+                    if feed.bozo:  # 检查feed解析是否有错误
+                        logger.warning(f"RSS源 {feed_name} 解析警告: {feed.bozo_exception}")
+                    
+                    # 检测是否为Atom格式（微信公众号通常使用Atom格式）
+                    is_atom_format = False
+                    if hasattr(feed, 'namespaces') and 'http://www.w3.org/2005/Atom' in feed.namespaces.values():
+                        is_atom_format = True
+                        logger.info(f"检测到Atom格式的RSS源: {feed_name}")
+                    
+                    articles_count = 0
+                    for entry in feed.entries:
+                        try:
+                            # 使用修复后的时间解析函数
+                            pub_time = _extract_publish_time(entry)
+                            
+                            # 时间过滤逻辑：如果有时间信息，才进行过滤；如果没有时间信息，则保留该条目
+                            should_include = True
+                            if pub_time is not None:
+                                # 只保留最近days天的文章
+                                should_include = pub_time >= cutoff_time
+                                if not should_include:
+                                    logger.debug(f"文章时间过旧，跳过: {entry.title if hasattr(entry, 'title') else '未知标题'} @ {pub_time}")
+                            else:
+                                # 如果没有时间信息，标记需要从网页提取
+                                logger.warning(f"RSS条目缺少时间信息，将尝试从网页提取: {entry.title if hasattr(entry, 'title') else '未知标题'}")
+                            
+                            if should_include:
+                                # 使用标准化的RSS解析函数提取信息
+                                entry_data = extract_rss_entry(entry, feed, feed_url)
+                                
+                                # 根据源类型设置不同的source标识
+                                if feed_name.lower().find('公众号') >= 0:
+                                    # 如果是公众号类型的源
+                                    source = "公众号精选"
+                                    if entry_data["author"] != "未知作者":
+                                        # 避免重复：如果feed_name已经包含了author信息，就不重复添加
+                                        if entry_data["author"] not in feed_name:
+                                            source = f"{feed_name}-{entry_data['author']}"
+                                        else:
+                                            source = feed_name  # 直接使用feed_name，避免重复
+                                else:
+                                    # 其他技术博客或新闻源
+                                    source = feed_name
+                                
+                                # 构建文章数据
+                                article_data = {
+                                    "title": entry_data["title"],
+                                    "url": entry_data["link"],
+                                    "source": source,
+                                    "hot": "",
+                                    "published": pub_time.strftime("%Y-%m-%d %H:%M:%S") if pub_time else "",
+                                    "needs_time_extraction": pub_time is None  # 标记是否需要从网页提取时间
+                                }
+                                
+                                content_found = False
+                                # --- 优先尝试获取 content ---
+                                # 1. 从 entry_data 获取预解析的 content (如果有)
+                                if entry_data.get("content"):
+                                    content_value = entry_data["content"]
+                                    # 基本清理 (去除CDATA)
+                                    if isinstance(content_value, str) and content_value.startswith('<![CDATA[') and content_value.endswith(']]>'):
+                                        content_value = content_value[9:-3]
+                                    if content_value and len(content_value.strip()) > 20:
+                                        article_data["content"] = content_value
+                                        logger.info(f"从 entry_data 获取到 content: {entry_data['title'][:30]}...")
+                                        content_found = True
+                                
+                                # 2. 检查 content:encoded (如果上面没找到)
+                                if not content_found:
+                                    # ... (Existing complex logic for finding content_encoded, using BeautifulSoup might simplify this)
+                                    # Example simplification: Let BeautifulSoup handle finding content-like tags
+                                    potential_content_html = ""
+                                    if hasattr(entry, 'content_encoded'): potential_content_html = entry.content_encoded
+                                    elif hasattr(entry, 'content'): # Check standard content field too
+                                        if isinstance(entry.content, list) and entry.content:
+                                            cont = entry.content[0]
+                                            if isinstance(cont, dict) and 'value' in cont: potential_content_html = cont.value
+                                            elif hasattr(cont, 'value'): potential_content_html = cont.value
+                                            else: potential_content_html = str(cont)
+                                    
+                                    if potential_content_html and isinstance(potential_content_html, str):
+                                        # Basic clean (CDATA)
+                                        if potential_content_html.startswith('<![CDATA[') and potential_content_html.endswith(']]>'):
+                                            potential_content_html = potential_content_html[9:-3]
+                                        # Use BeautifulSoup to get cleaner text if needed, or store raw HTML if long enough
+                                        if len(potential_content_html.strip()) > 100: # Heuristic for actual content vs short descriptions
+                                            article_data["content"] = potential_content_html
+                                            logger.info(f"从 RSS content/content_encoded 获取到较长内容: {entry_data['title'][:30]}...")
+                                            content_found = True
+                            
+                                # --- 获取并清理 summary (用作 desc) ---
+                                raw_summary = entry_data.get("summary", "")
+                                cleaned_summary_text = ""
+                                is_summary_valid = False # Flag to track validity
+                                if raw_summary and isinstance(raw_summary, str):
+                                    try:
+                                        # 使用BeautifulSoup去除HTML标签
+                                        soup = BeautifulSoup(raw_summary, 'html.parser')
+                                        cleaned_summary_text = soup.get_text(strip=True)
+                                    except Exception as parse_err:
+                                        logger.warning(f"解析摘要HTML时出错 for {entry_data['title'][:30]}: {parse_err}. 使用原始摘要.")
+                                        # cleaned_summary_text = raw_summary # Fallback removed, prefer AI summary if parsing fails
 
-                logger.info(f"从RSS源 {feed_name} 成功处理 {articles_count} 篇最近{days}天的文章") # Log count of successfully processed articles
-            except Exception as e:
-                 # Log error without assuming 'title' exists in this scope
-                logger.error(f"处理 RSS 源 {feed_name} ({feed_info.get('url', 'URL N/A')}) 时发生错误: {str(e)}")
-                # Optionally log traceback for more details
-                import traceback
-                logger.error(traceback.format_exc()) # Log full traceback for feed-level errors
+                                # 检查清理后的文本是否有效 (不太短, 不像链接)
+                                MIN_DESC_LENGTH = 10
+                                if cleaned_summary_text and \
+                                    len(cleaned_summary_text) > MIN_DESC_LENGTH and \
+                                    not cleaned_summary_text.startswith("点击查看原文") and \
+                                    "href=" not in cleaned_summary_text[:20]: # Added heuristic check for links
+
+                                    article_data["desc"] = cleaned_summary_text
+                                    is_summary_valid = True
+                                    logger.info(f"从 RSS summary 获取到有效 desc (可能较长, len={len(cleaned_summary_text)}): {entry_data['title'][:30]}...")
+                                
+                                # Log reason for invalidity if parsing succeeded but checks failed
+                                if not is_summary_valid and cleaned_summary_text:
+                                    if len(cleaned_summary_text) <= MIN_DESC_LENGTH:
+                                        reason = "太短"
+                                    elif cleaned_summary_text.startswith("点击查看原文") or "href=" in cleaned_summary_text[:20]:
+                                        reason = "像链接或固定文本"
+                                    else: # Ensure this else aligns correctly
+                                        reason = "未知原因(非太短/非链接)" # More specific reason
+                                    logger.info(f"RSS summary 无效 ({reason})，将不使用: '{cleaned_summary_text[:50]}...' for {entry_data['title'][:30]}")
+                                elif not is_summary_valid and not cleaned_summary_text: # Align elif correctly
+                                    logger.info(f"RSS summary 为空或解析失败 for {entry_data['title'][:30]}")
+
+                                batch_articles.append(article_data)
+                                articles_count += 1
+
+                        except Exception as entry_err: # Catch errors for this specific entry
+                            # Log error with entry link if available
+                            entry_link = "N/A"
+                            if hasattr(entry, 'link'):
+                                entry_link = entry.link
+                            elif hasattr(entry, 'get'):
+                                entry_link = entry.get('link', 'N/A')
+
+                            logger.error(f"处理 RSS 源 '{feed_name}' 的条目时出错: {entry_err}. Entry URL: {entry_link}")
+                            # Continue to the next entry
+                            continue
+
+                    logger.info(f"从RSS源 {feed_name} 成功处理 {articles_count} 篇最近{days}天的文章") # Log count of successfully processed articles
+                    
+                except Exception as e:
+                     # Log error without assuming 'title' exists in this scope
+                    logger.error(f"处理 RSS 源 {feed_name} ({feed_info.get('url', 'URL N/A')}) 时发生错误: {str(e)}")
+                    # Optionally log traceback for more details
+                    import traceback
+                    logger.error(traceback.format_exc()) # Log full traceback for feed-level errors
+                finally:
+                    # 确保Session被正确关闭
+                    if session is not None:
+                        try:
+                            session.close()
+                            logger.debug(f"已关闭RSS源 {feed_info.get('name', '未知')} 的Session连接")
+                        except Exception as close_err:
+                            logger.warning(f"关闭Session时出错: {close_err}")
+                        session = None
+            
+            # 将当前批次的文章添加到总列表
+            all_articles.extend(batch_articles)
+            logger.info(f"✅ 第 {batch_num + 1} 批处理完成，获取 {len(batch_articles)} 篇文章")
+            
+            # 清理批次数据
+            del batch_articles
+            
+            # 在批次间进行内存清理
+            import gc
+            gc.collect()
+            
+            # 批次间延迟，避免对服务器造成压力
+            if batch_num < total_batches - 1:  # 不是最后一批
+                logger.info(f"⏳ 批次间暂停 {RSS_BATCH_DELAY} 秒...")
+                time.sleep(RSS_BATCH_DELAY)
     
     # 如果没有提供rss_feeds或rss_feeds为空，且提供了rss_url，则使用单个rss_url
     elif rss_url:
+        session = None
         try:
             logger.info(f"使用单个RSS源: {rss_url}")
             
@@ -762,10 +815,14 @@ def fetch_rss_articles(rss_url=None, days=1, rss_feeds=None):
                 try:
                     # 先使用requests获取内容，添加增强的请求头避免被拦截
                     logger.info(f"尝试获取单个RSS源，第 {retry_count + 1} 次尝试")
-                    session = requests.Session()
+                    
+                    # 创建新的Session（如果还没有创建）
+                    if session is None:
+                        session = requests.Session()
+                        session.headers.update(headers)
+                    
                     response = session.get(
                         rss_url, 
-                        headers=headers, 
                         timeout=20, 
                         allow_redirects=True,
                         verify=True  # 验证SSL证书
@@ -953,11 +1010,20 @@ def fetch_rss_articles(rss_url=None, days=1, rss_feeds=None):
             logger.error(f"处理单个 RSS 源 {rss_url} 时发生错误: {str(e)}")
             import traceback
             logger.error(traceback.format_exc()) # Log full traceback
+        finally:
+            # 确保Session被正确关闭
+            if session is not None:
+                try:
+                    session.close()
+                    logger.debug(f"已关闭单个RSS源的Session连接")
+                except Exception as close_err:
+                    logger.warning(f"关闭Session时出错: {close_err}")
+                session = None
 
     else:
         logger.warning("未提供任何RSS源，无法获取文章")
     
-    logger.info(f"总共从所有RSS源获取到 {len(all_articles)} 篇最近{days}天的文章")
+    logger.info(f"✅ 总共从所有RSS源获取到 {len(all_articles)} 篇最近{days}天的文章")
     return all_articles
 
 def filter_recent_hotspots(hotspots, days=1):
@@ -1047,94 +1113,109 @@ def fetch_twitter_feed(days_to_fetch=2):
 
     logger.info(f"开始获取最近 {days_to_fetch} 天的 Twitter Feed...")
 
-    for i in range(days_to_fetch):
-        target_date = today - timedelta(days=i)
-        date_str = target_date.strftime("%Y-%m-%d")
-        file_url = f"{base_url}{date_str}.json"
-        logger.info(f"尝试获取推文文件: {file_url}")
+    # 创建统一的Session用于所有请求
+    session = requests.Session()
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+    })
 
+    try:
+        for i in range(days_to_fetch):
+            target_date = today - timedelta(days=i)
+            date_str = target_date.strftime("%Y-%m-%d")
+            file_url = f"{base_url}{date_str}.json"
+            logger.info(f"尝试获取推文文件: {file_url}")
+
+            try:
+                # 使用统一的Session获取 JSON 文件
+                response = session.get(file_url, timeout=15)
+
+                # 检查是否成功获取
+                if response.status_code == 404:
+                    logger.warning(f"未找到 {date_str} 的推文文件，跳过: {file_url}")
+                    continue
+                response.raise_for_status() # 检查其他 HTTP 错误
+
+                # 解析 JSON 数据
+                tweets_data = response.json()
+
+                if not isinstance(tweets_data, list):
+                     logger.warning(f"获取到的推文数据格式不是列表，跳过: {file_url}")
+                     continue
+
+                logger.info(f"成功获取并解析 {date_str} 的推文，共 {len(tweets_data)} 条")
+
+                # 格式化推文数据
+                for tweet in tweets_data:
+                    try:
+                        # 解析创建时间
+                        # 格式: Sat Mar 29 07:42:16 +0000 2025
+                        created_at_str = tweet.get("createdAt")
+                        created_at_dt = None
+                        timestamp_ms = None
+                        published_str = ""
+                        if created_at_str:
+                            try:
+                                # Python 3.7+ 支持 %z 解析 +0000
+                                created_at_dt = datetime.strptime(created_at_str, "%a %b %d %H:%M:%S %z %Y")
+                                timestamp_ms = int(created_at_dt.timestamp() * 1000)
+                                published_str = created_at_dt.strftime("%Y-%m-%d %H:%M:%S")
+                            except ValueError as time_err:
+                                logger.warning(f"解析推文时间失败: {created_at_str}, 错误: {time_err}")
+                                # 如果解析失败，可以尝试其他格式或跳过时间戳
+
+                        # 构建标题 (取 fullText 前 47 个字符 + ...)
+                        full_text = tweet.get("fullText", "")
+                        if len(full_text) > 50:
+                            title = full_text[:47] + "..."
+                        else:
+                            title = full_text # Use full text if shorter than 50
+
+                        # 获取来源
+                        source_name = "Twitter"
+                        user_info = tweet.get("user")
+                        if user_info:
+                            display_name = user_info.get("name")
+                            screen_name = user_info.get("screenName")
+                            if display_name: # 优先使用显示名称
+                                source_name = f"Twitter-{display_name}"
+                            elif screen_name: # 如果显示名称没有，则使用screenName
+                                source_name = f"Twitter-{screen_name}"
+                            # 如果两者都没有，则保持 "Twitter"
+
+                        # 格式化为标准字典
+                        formatted_tweet = {
+                            "title": title,
+                            "url": tweet.get("tweetUrl", ""),
+                            "source": source_name,
+                            "content": tweet.get("fullText", ""), # 使用 fullText 作为内容
+                            "hot": "", # 推文没有热度值
+                            "time": published_str, # 使用格式化后的时间字符串
+                            "timestamp": timestamp_ms, # 使用毫秒级时间戳
+                            "published": published_str, # 重复添加 published 字段以兼容 RSS 格式
+                            "desc": full_text, # Use full tweet text as initial description
+                        }
+                        # 推文没有预设摘要，所以不添加 desc 字段
+
+                        all_tweets_formatted.append(formatted_tweet)
+
+                    except Exception as format_err:
+                        logger.error(f"格式化推文时出错: {format_err}, 推文 URL: {tweet.get('tweetUrl')}")
+
+            except requests.exceptions.RequestException as req_err:
+                logger.error(f"获取推文文件失败: {file_url}, 错误: {req_err}")
+            except json.JSONDecodeError as json_err:
+                logger.error(f"解析推文 JSON 失败: {file_url}, 错误: {json_err}")
+            except Exception as e:
+                logger.error(f"处理推文文件时发生未知错误: {file_url}, 错误: {e}")
+
+    finally:
+        # 确保Session被正确关闭
         try:
-            # 使用 requests 获取 JSON 文件，GitHub Raw 一般不需要 cloudscraper
-            response = requests.get(file_url, timeout=15)
-
-            # 检查是否成功获取
-            if response.status_code == 404:
-                logger.warning(f"未找到 {date_str} 的推文文件，跳过: {file_url}")
-                continue
-            response.raise_for_status() # 检查其他 HTTP 错误
-
-            # 解析 JSON 数据
-            tweets_data = response.json()
-
-            if not isinstance(tweets_data, list):
-                 logger.warning(f"获取到的推文数据格式不是列表，跳过: {file_url}")
-                 continue
-
-            logger.info(f"成功获取并解析 {date_str} 的推文，共 {len(tweets_data)} 条")
-
-            # 格式化推文数据
-            for tweet in tweets_data:
-                try:
-                    # 解析创建时间
-                    # 格式: Sat Mar 29 07:42:16 +0000 2025
-                    created_at_str = tweet.get("createdAt")
-                    created_at_dt = None
-                    timestamp_ms = None
-                    published_str = ""
-                    if created_at_str:
-                        try:
-                            # Python 3.7+ 支持 %z 解析 +0000
-                            created_at_dt = datetime.strptime(created_at_str, "%a %b %d %H:%M:%S %z %Y")
-                            timestamp_ms = int(created_at_dt.timestamp() * 1000)
-                            published_str = created_at_dt.strftime("%Y-%m-%d %H:%M:%S")
-                        except ValueError as time_err:
-                            logger.warning(f"解析推文时间失败: {created_at_str}, 错误: {time_err}")
-                            # 如果解析失败，可以尝试其他格式或跳过时间戳
-
-                    # 构建标题 (取 fullText 前 47 个字符 + ...)
-                    full_text = tweet.get("fullText", "")
-                    if len(full_text) > 50:
-                        title = full_text[:47] + "..."
-                    else:
-                        title = full_text # Use full text if shorter than 50
-
-                    # 获取来源
-                    source_name = "Twitter"
-                    user_info = tweet.get("user")
-                    if user_info:
-                        display_name = user_info.get("name")
-                        screen_name = user_info.get("screenName")
-                        if display_name: # 优先使用显示名称
-                            source_name = f"Twitter-{display_name}"
-                        elif screen_name: # 如果显示名称没有，则使用screenName
-                            source_name = f"Twitter-{screen_name}"
-                        # 如果两者都没有，则保持 "Twitter"
-
-                    # 格式化为标准字典
-                    formatted_tweet = {
-                        "title": title,
-                        "url": tweet.get("tweetUrl", ""),
-                        "source": source_name,
-                        "content": tweet.get("fullText", ""), # 使用 fullText 作为内容
-                        "hot": "", # 推文没有热度值
-                        "time": published_str, # 使用格式化后的时间字符串
-                        "timestamp": timestamp_ms, # 使用毫秒级时间戳
-                        "published": published_str, # 重复添加 published 字段以兼容 RSS 格式
-                        "desc": full_text, # Use full tweet text as initial description
-                    }
-                    # 推文没有预设摘要，所以不添加 desc 字段
-
-                    all_tweets_formatted.append(formatted_tweet)
-
-                except Exception as format_err:
-                    logger.error(f"格式化推文时出错: {format_err}, 推文 URL: {tweet.get('tweetUrl')}")
-
-        except requests.exceptions.RequestException as req_err:
-            logger.error(f"获取推文文件失败: {file_url}, 错误: {req_err}")
-        except json.JSONDecodeError as json_err:
-            logger.error(f"解析推文 JSON 失败: {file_url}, 错误: {json_err}")
-        except Exception as e:
-            logger.error(f"处理推文文件时发生未知错误: {file_url}, 错误: {e}")
+            session.close()
+            logger.debug("已关闭Twitter获取的Session连接")
+        except Exception as close_err:
+            logger.warning(f"关闭Twitter Session时出错: {close_err}")
 
     logger.info(f"总共获取并格式化了 {len(all_tweets_formatted)} 条推文")
     return all_tweets_formatted

@@ -405,6 +405,10 @@ RSS_FEEDS = [
 
 ]
 
+# RSS源分批处理配置
+RSS_BATCH_SIZE = 5  # 每批处理的RSS源数量
+RSS_BATCH_DELAY = 2  # 批次间延迟（秒）
+
 # 其他配置
 TITLE_LENGTH = int(os.getenv('TITLE_LENGTH', '20'))
 MAX_WORKERS = int(os.getenv('MAX_WORKERS', '5'))
