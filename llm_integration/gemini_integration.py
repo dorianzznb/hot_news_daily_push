@@ -62,7 +62,7 @@ def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.0-flash-exp", 
                 prompt = f"""
                 以下是今日科技热点信息列表（包含新闻和社交媒体帖子，JSON格式），部分条目包含内容摘要：
                 {hotspot_json}
-                请总结出10条最重要的AI相关科技新闻，去除重复和无关内容。如果AI相关数量不足允许补充其他热点科技新闻。
+                请总结出10条最重要的AI相关科技新闻，去除重复和无关内容。
                 重点关注最新发布的AI技术、模型或者产品等，相关新闻在返回的结果排序中需要前置；公众号的文章权重更高，其余结果按重要性排序。
                 你需要将相似的新闻合并为一条，并提供一个直观简洁的中文标题，需要讲清楚新闻内容不要太泛化（不超过30个字）。
                 同时，也请关注来自 Twitter 等社交媒体源 (source: Twitter) 的重要信息，特别是关于最新 AI 技术突破、模型发布或重要行业及AI产品动态的帖子，它们同样具有很高的价值。
@@ -138,7 +138,7 @@ def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.0-flash-exp", 
                 api_url,
                 headers=headers,
                 json=payload,
-                timeout=60
+                timeout=300
             )
             
             response.raise_for_status()

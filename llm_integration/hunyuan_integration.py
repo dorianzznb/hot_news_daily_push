@@ -49,7 +49,7 @@ def summarize_with_tencent_hunyuan(content, api_key, title="", max_retries=3, us
             
             # 创建LLM实例，添加正确的base_url
             llm = ChatOpenAI(
-                model="hunyuan-turbos-latest",  # 使用hunyuan-turboS模型
+                model="hunyuan-2.0-instruct-20251111",  # 使用hunyuan-turboS模型
                 temperature=0.3,
                 api_key=api_key,
                 max_tokens=150,
@@ -59,14 +59,14 @@ def summarize_with_tencent_hunyuan(content, api_key, title="", max_retries=3, us
             # 创建提示模板，要求返回JSON格式
             prompt = PromptTemplate(
                 input_variables=["content", "title"],
-                template="""请对以下新闻内容进行简洁概述，并判断是否与科技相关（包括AI、人工智能、互联网、软件、硬件、电子产品等）。请优先通过新闻标题来判断是否与科技相关，如果标题中没有科技相关的关键词，请通过新闻内容来判断。
+                template="""请对以下新闻内容输出内容摘要，并判断是否与科技相关（包括AI、人工智能、互联网、软件、硬件、电子产品等）。请优先通过新闻标题来判断是否与科技相关，如果标题中没有科技相关的关键词，请通过新闻内容来判断。
                     
                     新闻标题：{title}
                     新闻内容：
                     {content}
                     
                     请以JSON格式返回，包含以下字段：
-                    1. summary: 新闻摘要，不超过150个字
+                    1. summary: 新闻摘要，不超过300个字
                     2. is_tech: 布尔值，表示是否与科技相关
 
                     只返回JSON格式，不要有任何额外说明。
