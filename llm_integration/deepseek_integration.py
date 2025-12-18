@@ -11,7 +11,7 @@ import time
 import logging
 import requests
 from datetime import datetime
-from config.config import SOURCE_NAME_MAP
+from config.config import SOURCE_NAME_MAP, MAX_RELATED_IDS
 from utils.utils import format_title_for_display
 
 # 配置日志
@@ -172,8 +172,8 @@ def summarize_with_deepseek(hotspots, api_key, api_url=None, model_id=None, max_
                     
                     formatted_summary += f"## ** {num} {title} **  \n"
                     
-                    # 添加相关链接，使用优化的格式
-                    related_ids = news.get("related_ids", [])
+                    # 添加相关链接，使用优化的格式，限制最大ID数量
+                    related_ids = news.get("related_ids", [])[:MAX_RELATED_IDS]
                     for news_id in related_ids:
                         if news_id in hotspot_dict:
                             item = hotspot_dict[news_id]

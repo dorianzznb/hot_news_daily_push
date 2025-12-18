@@ -13,7 +13,7 @@ import requests
 import re
 import google.generativeai as genai
 from datetime import datetime
-from config.config import SOURCE_NAME_MAP
+from config.config import SOURCE_NAME_MAP, MAX_RELATED_IDS
 from utils.utils import format_title_for_display
 
 # 配置日志
@@ -222,7 +222,7 @@ def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.0-flash-exp", 
                     """计算文本的UTF-8字节长度"""
                     return len(text.encode('utf-8'))
                 
-                def build_formatted_summary(news_items, max_ids_per_news=10):
+                def build_formatted_summary(news_items, max_ids_per_news=MAX_RELATED_IDS):
                     """构建格式化摘要，支持动态调整每条新闻的关联ID数量"""
                     formatted_summary = ""
                     for index, news in enumerate(news_items[:20]):

@@ -47,6 +47,9 @@ DEEPSEEK_MODEL_ID = os.getenv('DEEPSEEK_MODEL_ID')
 RSS_URL = os.getenv('RSS_URL')
 RSS_DAYS = int(os.getenv('RSS_DAYS', '1'))
 
+# 推送内容配置
+MAX_RELATED_IDS = int(os.getenv('MAX_RELATED_IDS', '3'))  # 每条新闻最多显示的关联ID数量
+
 # RSS源列表
 RSS_FEEDS = [
     {
