@@ -25,8 +25,8 @@ CRAWL4AI_MAX_RETRIES = int(os.getenv('CRAWL4AI_MAX_RETRIES', '2'))
 
 # 总结模型选择 (支持: deepseek, gemini)
 SUMMARY_MODEL = os.getenv('SUMMARY_MODEL', 'deepseek')
-GEMINI_MODEL_NAME = os.getenv('GEMINI_MODEL_NAME', 'gemini-2.0-flash-exp')
-GEMINI_BASE_URL = os.getenv('GEMINI_BASE_URL', 'https://gemini.kbz.ink')
+GEMINI_MODEL_NAME = os.getenv('GEMINI_MODEL_NAME', 'gemini-2.5-flash')
+GEMINI_BASE_URL = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com')
 
 # Webhook URL
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')

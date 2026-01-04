@@ -228,37 +228,57 @@ def save_summary_cache(cache, cache_dir="cache/summary"):
     except Exception as e:
         logger.warning(f"保存摘要缓存失败: {str(e)}")
 
-def check_base_url(base_url):
+def check_base_url(base_url, max_retries=3, retry_delay=5):
     """
-    检查 BASE_URL 是否可访问
+    检查 BASE_URL 是否可访问，支持重试机制
+    
+    参数:
+        base_url: 要检查的 API 基础 URL
+        max_retries: 最大重试次数，默认 3 次
+        retry_delay: 每次重试之间的延迟秒数，默认 5 秒
+    
+    返回:
+        bool: URL 是否可访问
     """
     import requests
-    session = None
-    try:
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-        })
-        
-        response = session.get(f"{base_url}/bilibili?limit=5", timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("code") == 200:
-            logger.info(f"BASE_URL 检查通过: {base_url}")
-            return True
-        else:
-            logger.error(f"BASE_URL 返回错误: {data}")
-            return False
-    except Exception as e:
-        logger.error(f"BASE_URL 检查失败: {str(e)}")
-        return False
-    finally:
-        # 确保Session被正确关闭
-        if session:
-            try:
-                session.close()
-            except:
-                pass
+    
+    for attempt in range(1, max_retries + 1):
+        session = None
+        try:
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+            })
+            
+            logger.info(f"正在检查 BASE_URL (第 {attempt}/{max_retries} 次尝试): {base_url}")
+            response = session.get(f"{base_url}/bilibili?limit=5", timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("code") == 200:
+                logger.info(f"BASE_URL 检查通过: {base_url}")
+                return True
+            else:
+                logger.warning(f"BASE_URL 返回异常响应: {data}")
+                # 响应格式异常也需要重试
+                raise Exception(f"API 返回异常: {data}")
+        except Exception as e:
+            logger.warning(f"BASE_URL 检查失败 (第 {attempt}/{max_retries} 次): {str(e)}")
+            
+            if attempt < max_retries:
+                logger.info(f"{retry_delay} 秒后进行第 {attempt + 1} 次重试...")
+                time.sleep(retry_delay)
+            else:
+                logger.error(f"BASE_URL 检查失败，已达到最大重试次数 ({max_retries} 次): {base_url}")
+                return False
+        finally:
+            # 确保Session被正确关闭
+            if session:
+                try:
+                    session.close()
+                except:
+                    pass
+    
+    return False
 
 def format_title_for_display(title, source, max_length=30):
     """

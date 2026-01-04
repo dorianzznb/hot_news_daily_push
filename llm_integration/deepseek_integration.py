@@ -215,15 +215,7 @@ def summarize_with_deepseek(hotspots, api_key, api_url=None, model_id=None, max_
             else:
                 break
     
-    # 如果所有重试都失败，返回前20条热点作为备选
-    logger.warning("无法使用Deepseek API归类热点，将使用原始热点")
-    fallback = ""
-    for i, item in enumerate(hotspots[:10]):
-        num = str(i + 1).zfill(2)
-        source_name = SOURCE_NAME_MAP.get(item['source'], item['source'])
-        item_title = item['title']
-        # 格式化标题，确保长度一致
-        formatted_title = format_title_for_display(item_title, source_name, 30)
-        fallback += f"## ** {num} {item['title']} **  \n"
-        fallback += f"- [{item_title}]({item['url']}) `🏷️{source_name}` \n\n"
-    return fallback
+    # 如果所有重试都失败，抛出异常中断流程
+    error_msg = f"Deepseek API调用失败，已达到最大重试次数 {max_retries}"
+    logger.error(error_msg)
+    raise Exception(error_msg)

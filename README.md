@@ -161,7 +161,7 @@ DEEPSEEK_API_KEY="your_deepseek_api_key"  # DeepSeek AI API密钥 (用于最终�
 # Google Gemini 配置 (当 SUMMARY_MODEL=gemini 时必填)
 GEMINI_API_KEY="your_gemini_api_key"      # Google Gemini API密钥 (用于最终总结)
 GEMINI_BASE_URL="https://your-gemini-proxy.com"  # Gemini API代理端点URL
-GEMINI_MODEL_NAME="gemini-2.0-flash-exp"  # Gemini模型名称
+GEMINI_MODEL_NAME="gemini-2.5-flash"  # Gemini模型名称
 
 # 腾讯混元配置 (用于单条摘要生成)
 HUNYUAN_API_KEY="your_hunyuan_api_key"    # 腾讯混元大模型API密钥 (如果SKIP_CONTENT=false且来源非Twitter则可能需要)

@@ -19,7 +19,7 @@ from utils.utils import format_title_for_display
 # 配置日志
 logger = logging.getLogger(__name__)
 
-def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.0-flash-exp", base_url="https://gemini.kbz.ink", max_retries=3, tech_only=False):
+def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.5-flash", base_url="https://generativelanguage.googleapis.com", max_retries=3, tech_only=False):
     """
     使用Google Gemini API对热点进行汇总归类，支持重试
     根据tech_only参数使用不同的prompt
@@ -341,10 +341,12 @@ def summarize_with_gemini(hotspots, api_key, model_name="gemini-2.0-flash-exp", 
             else:
                 break
     
-    logger.error(f"Gemini API调用失败，已达到最大重试次数 {max_retries}")
-    return "Gemini API调用失败，请检查API密钥和网络连接"
+    # 如果所有重试都失败，抛出异常中断流程
+    error_msg = f"Gemini API调用失败，已达到最大重试次数 {max_retries}，请检查API密钥和网络连接"
+    logger.error(error_msg)
+    raise Exception(error_msg)
 
-def test_gemini_connection(api_key, model_name="gemini-2.0-flash-exp", base_url="https://gemini.kbz.ink"):
+def test_gemini_connection(api_key, model_name="gemini-2.5-flash", base_url="https://generativelanguage.googleapis.com"):
     """
     测试Gemini API连接
     """

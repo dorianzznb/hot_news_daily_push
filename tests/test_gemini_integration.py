@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 def test_gemini_api_connection():
     """测试Gemini API连接"""
     api_key = os.getenv('GEMINI_API_KEY')
-    base_url = os.getenv('GEMINI_BASE_URL', 'https://gemini.kbz.ink')
-    model_name = os.getenv('GEMINI_MODEL_NAME', 'gemini-2.0-flash-exp')
+    base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com')
+    model_name = os.getenv('GEMINI_MODEL_NAME', 'gemini-2.5-flash')
     
     if not api_key:
         logger.error("未设置GEMINI_API_KEY环境变量")
@@ -45,7 +45,7 @@ def test_gemini_api_connection():
 def test_gemini_summarization():
     """测试Gemini总结功能"""
     api_key = os.getenv('GEMINI_API_KEY')
-    base_url = os.getenv('GEMINI_BASE_URL', 'https://gemini.kbz.ink')
+    base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com')
     if not api_key:
         logger.error("未设置GEMINI_API_KEY环境变量")
         return False
