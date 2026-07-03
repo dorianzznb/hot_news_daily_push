@@ -142,8 +142,9 @@ def safe_main():
     # 检查必要的API密钥和配置
     config_errors = []
     
-    if not webhook:
-        config_errors.append("未提供Webhook URL")
+    fs_key = os.getenv("FSKEY")
+    if not webhook and not fs_key:
+        config_errors.append("未提供Webhook URL或飞书FSKEY")
     
     # 根据选择的总结模型检查相应的API密钥
     if summary_model == 'gemini':
