@@ -203,7 +203,7 @@ def safe_main():
             {"BASE_URL": base_url, "错误": str(e)},
             "网络检查"
         )
-        sys.exit(1)
+        # sys.exit(1) removed - continue with warning
     
     # 根据参数选择信息源
     sources = TECH_SOURCES if tech_only else ALL_SOURCES
