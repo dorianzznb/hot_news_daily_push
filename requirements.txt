@@ -1,0 +1,66 @@
+# 鐑偣鏂伴椈鏀堕泦涓庢帹閫佸伐鍏蜂緷璧栭」
+# Hot News Daily Push Tool Dependencies
+
+# ==========================================
+# 鏍稿績HTTP鍜岀綉缁滃簱 (Core HTTP & Network)
+# ==========================================
+requests>=2.28.0              # HTTP璇锋眰搴擄紝鐢ㄤ簬API璋冪敤鍜岀綉椤垫姄鍙?
+cloudscraper>=1.2.71           # 缁曡繃Cloudflare淇濇姢鐨勭綉椤垫姄鍙?
+
+# ==========================================  
+# 鐜鍙橀噺绠＄悊 (Environment Management)
+# ==========================================
+python-dotenv>=1.0.0          # 鍔犺浇.env鏂囦欢涓殑鐜鍙橀噺
+
+# ==========================================
+# 缃戦〉瑙ｆ瀽鍜屽唴瀹规彁鍙?(Web Parsing & Content Extraction)
+# ==========================================
+beautifulsoup4>=4.12.0        # HTML/XML瑙ｆ瀽鍣?
+feedparser>=6.0.10            # RSS/Atom feed瑙ｆ瀽鍣?
+newspaper3k>=0.2.8            # 鏂伴椈鏂囩珷鍐呭鎻愬彇
+trafilatura>=2.0.0            # 缃戦〉鏂囨湰鍐呭鎻愬彇
+
+# ==========================================
+# 鏃ユ湡鏃堕棿澶勭悊 (Date & Time Processing)
+# ==========================================
+python-dateutil>=2.8.2       # 鎵╁睍鐨勬棩鏈熸椂闂磋В鏋愬拰澶勭悊
+
+# ==========================================
+# LangChain鐩稿叧 (LangChain Framework)
+# ==========================================
+# 娉ㄦ剰锛氶」鐩腑鏌愪簺鍔熻兘鍙兘浣跨敤LangChain锛屼絾涓昏渚濊禆鑷畾涔夊疄鐜?
+langchain>=0.1.0,<0.3
+langchain-community>=0.0.10,<0.3
+langchain-core>=0.1.0,<0.3
+langchain-openai>=0.0.5
+
+# ==========================================
+# AI妯″瀷API闆嗘垚 (AI Model API Integration)
+# ==========================================
+google-generativeai>=0.8.0    # Google Gemini API瀹㈡埛绔?
+
+# ==========================================
+# 寮€鍙戝拰娴嬭瘯宸ュ叿 (Development & Testing - Optional)
+# ==========================================
+# 鍙栨秷娉ㄩ噴浠ヤ笅琛屼互瀹夎寮€鍙戝伐鍏?
+# pytest>=7.0.0               # 娴嬭瘯妗嗘灦
+# flake8>=6.0.0               # 浠ｇ爜椋庢牸妫€鏌?
+# black>=23.0.0               # 浠ｇ爜鏍煎紡鍖栧伐鍏?
+
+# ==========================================
+# 瀹夎璇存槑 (Installation Instructions)
+# ==========================================
+# 1. 鍒涘缓铏氭嫙鐜 (鎺ㄨ崘):
+#    python -m venv venv
+#    source venv/bin/activate  # Linux/Mac
+#    venv\Scripts\activate     # Windows
+#
+# 2. 瀹夎渚濊禆:
+#    pip install -r requirements.txt
+#
+# 3. 閰嶇疆鐜鍙橀噺:
+#    cp env_gemini_example.txt .env
+#    # 缂栬緫.env鏂囦欢锛屽～鍏ョ湡瀹炵殑API瀵嗛挜
+#
+# 4. 杩愯娴嬭瘯:
+#    python tests/test_gemini_integration.py
