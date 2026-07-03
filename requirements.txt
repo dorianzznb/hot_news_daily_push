@@ -37,6 +37,7 @@ langchain-openai>=0.0.5
 # ==========================================
 # AI妯″瀷API闆嗘垚 (AI Model API Integration)
 # ==========================================
+openai>=1.0.0              # OpenAI SDK (also used by DeepSeek API)
 google-generativeai>=0.8.0    # Google Gemini API瀹㈡埛绔?
 
 # ==========================================
