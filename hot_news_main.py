@@ -195,8 +195,7 @@ def safe_main():
                 {"BASE_URL": base_url},
                 "网络检查"
             )
-            logger.error(f"BASE_URL {base_url} 不可访问，程序退出")
-            sys.exit(1)
+            logger.warning(f"BASE_URL {base_url} 不可访问，将尝试继续执行")
     except Exception as e:
         notify_critical_error(
             "网络检查异常",
